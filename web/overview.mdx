@@ -1,0 +1,44 @@
+---
+title: "Binary Internals Web Server: HTTP File Parsing Interface"
+sidebarTitle: "Overview"
+description: "BinaryInternalsWeb exposes the same format plug-ins as the desktop viewer over HTTP, giving you a browser-based UI and a JSON REST API."
+---
+
+The Binary Internals Web Server (`BinaryInternalsWeb`) is a self-contained HTTP server that brings the desktop viewer's format analysis capabilities to a network-accessible interface. Instead of opening files through a Swing GUI, you send file bytes in an HTTP request and receive a structured JSON tree that describes every byte of the file — the same tree the desktop viewer renders interactively. This makes it straightforward to embed format analysis into CI pipelines, build tooling, or web applications without requiring a display.
+
+## How it relates to the desktop viewer
+
+The web server loads exactly the same format plug-ins that the desktop viewer uses (BMP, Class, JPEG, PNG, ZIP, and more). The plug-ins are discovered at runtime via `ServiceLoader`, so adding a new format module to the classpath is enough to make it available in both interfaces. The JSON response is a direct serialisation of the `JTreeNodeFileComponent` tree the plug-ins produce, meaning every field — byte offset, length, icon, and HTML description — is identical to what you see in the desktop view.
+
+## Two use modes
+
+**Browser-based web UI** — visiting `GET /` in a browser loads a single-page application that lets you upload a file and explore its structure visually, with collapsible nodes and icon decorations.
+
+**REST API** — any HTTP client can `POST` raw file bytes to `/api/v1/parse` and receive a JSON tree. This is suitable for automated tools, scripts, or other services that need machine-readable format analysis.
+
+## Endpoints at a glance
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/` | Browser-based web UI |
+| `GET` | `/health` | Health check — returns `{"status":"UP"}` |
+| `GET` | `/api/v1/formats` | JSON list of all supported file formats and extensions |
+| `POST` | `/api/v1/parse?name=Foo.class` | Parse uploaded file bytes; returns a JSON node tree |
+| `GET` | `/icons/{Name}.png` | PNG image for a named tree-node icon |
+
+## Concurrency model
+
+Every HTTP request is handled on a **Java virtual thread**, created via `Executors.newVirtualThreadPerTaskExecutor()`. Virtual threads are lightweight and scale to thousands of simultaneous connections without the memory overhead of platform threads. Parse operations are further bounded by a semaphore (`MAX_CONCURRENT_PARSES`) so that a surge of large uploads cannot exhaust CPU or heap.
+
+## Gzip compression
+
+Responses that are **1 024 bytes or larger** are automatically compressed with gzip when the client sends an `Accept-Encoding: gzip` header. Parse responses in particular benefit greatly from compression because the JSON trees repeat description text many times. Use `curl --compressed` or set the header in your HTTP client to take advantage of this. Image responses (`image/png`) are never gzip-compressed.
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="sliders" href="/web/configuration">
+    All environment variables, Docker flags, CORS settings, and security recommendations.
+  </Card>
+  <Card title="API Reference" icon="code" href="/web/api-reference">
+    Full reference for every endpoint: request parameters, response shapes, and error codes.
+  </Card>
+</CardGroup>

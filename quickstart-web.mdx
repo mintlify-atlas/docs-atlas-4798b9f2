@@ -1,0 +1,135 @@
+---
+title: "Run the Binary Internals Web Server and HTTP API"
+sidebarTitle: "Web Server"
+description: "Start the Binary Internals web server via Docker or plain Java, then POST any supported binary file to the parse API and receive a structured JSON tree."
+---
+
+The Binary Internals Web Server exposes the same file-parsing engine as the desktop viewer through a browser UI and an HTTP API. You can upload any supported binary file and receive a JSON tree that describes every field, its byte offset, its length, and a human-readable description. This page covers how to start the server and make your first API call.
+
+## Start the Server
+
+<Tabs>
+  <Tab title="Docker">
+    Run the following two commands from the **repository root**. The first builds the image; the second starts the container with a read-only filesystem, a small tmpfs for uploads, and resource limits to contain a runaway parse.
+
+    ```bash
+    docker build -f BinaryInternalsWeb/Dockerfile -t binaryinternals-web .
+    ```
+
+    ```bash
+    docker run --rm -p 8080:8080 \
+      --read-only --tmpfs /tmp \
+      --memory 512m --cpus 1 \
+      binaryinternals-web
+    ```
+
+    Open [http://localhost:8080](http://localhost:8080) in your browser to verify the server is running.
+  </Tab>
+  <Tab title="Docker Compose">
+    Docker Compose handles both building and running in one command. Run from the **repository root**:
+
+    ```bash
+    # Build the image and start the container in the background
+    docker compose -f BinaryInternalsWeb/docker-compose.yml up -d --build
+    ```
+
+    Open [http://localhost:8080](http://localhost:8080) to verify the server is running.
+
+    To stop the server:
+
+    ```bash
+    docker compose -f BinaryInternalsWeb/docker-compose.yml down
+    ```
+
+    The Compose file sets `MAX_UPLOAD_MB=20`, `MAX_CONCURRENT_PARSES=2`, `PARSE_TIMEOUT_SECONDS=30`, and `CORS_ORIGIN=*` as default environment variables. Edit `BinaryInternalsWeb/docker-compose.yml` to change them.
+  </Tab>
+  <Tab title="Java (no Docker)">
+    After building the project with `mvn install`, run the fat JAR directly:
+
+    ```bash
+    java -jar BinaryInternalsWeb/target/BinaryInternalsWeb-3.7.jar
+    ```
+
+    Alternatively, start it as a named Java module with an explicit module path:
+
+    ```bash
+    java \
+      -p BinaryInternalsWeb/target/libs:BinaryInternalsWeb/target/BinaryInternalsWeb-3.7.jar \
+      -m org.binaryinternals.web/org.binaryinternals.web.WebServer
+    ```
+
+    By default the server listens on `127.0.0.1:8080`. Set the `HOST` and `PORT` environment variables to change the bind address and port before launching.
+  </Tab>
+</Tabs>
+
+## Parse a File with the API
+
+Once the server is running, send the raw file content as the POST body with the filename as the `name` query parameter:
+
+```bash
+curl --compressed \
+  --data-binary @Foo.class \
+  "http://localhost:8080/api/v1/parse?name=Foo.class"
+```
+
+The `--compressed` flag requests gzip encoding. The response is a JSON tree representing the parsed file structure.
+
+<Note>
+  Uploaded files are written to a temporary file only for the duration of parsing. The temporary file is deleted immediately after the parse completes, regardless of whether it succeeded or failed.
+</Note>
+
+### Response Structure
+
+Each node in the returned JSON tree has the following shape:
+
+```json
+{
+  "text": "magic: CAFEBABE",
+  "start": 0,
+  "length": 4,
+  "icon": "Magic",
+  "description": "The magic number that identifies this as a Java class file.",
+  "children": [...]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `text` | string | Display label for the node |
+| `start` | number | Byte offset of the field within the file |
+| `length` | number | Length of the field in bytes |
+| `icon` | string | Icon name for the node — omitted when absent |
+| `description` | string | HTML description of the field — omitted when absent |
+| `children` | array | Nested child nodes — omitted when absent |
+
+### Error Responses
+
+When parsing fails, the server returns a JSON error object:
+
+```json
+{ "status": 415, "error": "Unsupported file type: Foo.xyz" }
+```
+
+| HTTP Status | Meaning |
+|---|---|
+| 400 | Missing or invalid request parameter |
+| 405 | Wrong HTTP method |
+| 413 | File exceeds the upload size limit |
+| 415 | File type not supported by any plug-in |
+| 422 | File content is invalid or cannot be parsed |
+| 503 | Server is busy; retry later |
+| 504 | Parse timed out |
+
+## Other Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /` | GET | Browser UI |
+| `GET /health` | GET | Returns `{"status":"UP"}` |
+| `GET /api/v1/formats` | GET | Lists supported formats and their file extensions |
+| `POST /api/v1/parse?name=<filename>` | POST | Parses the request body and returns the JSON tree |
+
+## Next Steps
+
+- See [API Reference](/web/api-reference) for the full endpoint specification.
+- See [Configuration](/web/configuration) for all environment variables (`HOST`, `PORT`, `MAX_UPLOAD_MB`, `MAX_CONCURRENT_PARSES`, `PARSE_TIMEOUT_SECONDS`, `CORS_ORIGIN`).

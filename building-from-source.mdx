@@ -1,0 +1,138 @@
+---
+title: "Build Binary Internals from Source"
+sidebarTitle: "Build from Source"
+description: "Clone the repository, set JAVA_HOME, and run build.sh or build.cmd to produce the viewer JAR, the web server JAR, and the individual format library JARs."
+---
+
+Building from source is useful when you want to run the latest unreleased changes, contribute a fix, or embed a custom format plug-in. The build is driven by Apache Maven and produces all three kinds of artifacts — the desktop viewer, the web server, and the standalone format JARs — in a single command.
+
+## Prerequisites
+
+Before you build, make sure the following are available on your machine:
+
+| Requirement | Version | Notes |
+|---|---|---|
+| OpenJDK | 11 or higher (tested up to 25) | Set `JAVA_HOME` to the JDK root |
+| Apache Maven | 3.9 or higher | Required for the `${revision}` CI Friendly Versions feature |
+
+<Warning>
+  Maven **3.9 or higher** is required. Older versions do not support the [Maven CI Friendly Versions](https://maven.apache.org/maven-ci-friendly.html) `${revision}` property used in the root `pom.xml`, and the build will fail with an unresolved variable error.
+</Warning>
+
+Verify both tools are on your `PATH`:
+
+```bash
+java -version
+mvn --version
+```
+
+## macOS Extra Dependencies
+
+On macOS the build script uses GNU coreutils, GNU parallel, and Graphviz. Install them with Homebrew before running the build:
+
+```bash
+brew install coreutils
+brew install parallel
+brew install graphviz
+```
+
+## Build Steps
+
+<Steps>
+
+  ### Clone the Repository
+
+  ```bash
+  git clone https://github.com/amosshi/binaryinternals.git
+  cd binaryinternals
+  ```
+
+  ### Set JAVA_HOME
+
+  The build script validates that `JAVA_HOME` points to a valid JDK before it does anything else. Set it for your platform:
+
+  <CodeGroup>
+
+  ```bash Linux
+  export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64
+  ```
+
+  ```bash macOS
+  export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-25.jdk/Contents/Home
+  ```
+
+  ```bash Windows (CMD)
+  set JAVA_HOME=C:\data\tools\jdk
+  ```
+
+  </CodeGroup>
+
+  Replace the path with the actual location of your JDK installation. If `JAVA_HOME` is already set by your operating system or IDE, you can skip this step.
+
+  ### Run the Build Script
+
+  <CodeGroup>
+
+  ```bash Linux / macOS / Git Bash
+  ./build.sh
+  ```
+
+  ```bat Windows CMD
+  build.cmd
+  ```
+
+  </CodeGroup>
+
+  The script verifies your Java and Maven versions, purges and re-resolves the local Maven repository, then executes:
+
+  ```bash
+  mvn clean install
+  ```
+
+  A full build also generates the dependency graph SVG, aggregated Javadocs, and a dependency update report.
+
+  ### Find the Output Artifacts
+
+  After a successful build, the compiled JARs are in each module's `target/` directory:
+
+  | Artifact | Location |
+  |---|---|
+  | `BinaryInternalsViewer-3.7-timestamp.jar` | `BinaryInternalsViewer/target/` |
+  | `BinaryInternalsWeb-3.7.jar` | `BinaryInternalsWeb/target/` |
+  | `FormatCLASS-3.7.jar` | `FormatCLASS/target/` |
+  | `FormatBMP-3.7.jar` | `FormatBMP/target/` |
+  | `FormatJPEG-3.7.jar` | `FormatJPEG/target/` |
+  | `FormatPNG-3.7.jar` | `FormatPNG/target/` |
+  | `FormatZIP-3.7.jar` | `FormatZIP/target/` |
+  | `FormatDEX-3.7.jar` | `FormatDEX/target/` |
+  | `FormatELF-3.7.jar` | `FormatELF/target/` |
+
+  The viewer JAR name includes a build timestamp appended by the assembly plugin, for example `BinaryInternalsViewer-3.7-20261017000000.jar`.
+
+</Steps>
+
+## Version Numbering
+
+<Note>
+  Binary Internals uses [Maven CI Friendly Versions](https://maven.apache.org/maven-ci-friendly.html). The root `pom.xml` declares `<revision>3.7</revision>` in its `<properties>` block, and every child module references that value as `${revision}`. This means you can override the version at build time without editing any POM file: `mvn clean install -Drevision=3.8-SNAPSHOT`.
+</Note>
+
+The `flatten-maven-plugin` resolves `${revision}` before installing or deploying, so the published POM files in your local Maven repository contain the literal version string rather than the placeholder.
+
+## Running Maven Directly
+
+If you prefer to invoke Maven without the build script (for example, to skip the Javadoc and graph steps), use:
+
+```bash
+mvn clean install
+```
+
+To skip the static analysis checks during a quick iteration:
+
+```bash
+mvn clean install \
+  -DskipTests \
+  -Dcheckstyle.skip=true \
+  -Dspotbugs.skip=true \
+  -Dpmd.skip=true
+```

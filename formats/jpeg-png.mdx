@@ -1,0 +1,184 @@
+---
+title: "JPEG and PNG Image Formats — Binary Internals Parser"
+sidebarTitle: "JPEG & PNG"
+description: "How Binary Internals parses JPEG and PNG image files, exposing JPEG marker segments (SOI, APP0–APP15, DHT, DQT, SOF, SOS, EOI) and PNG chunks (IHDR, IDAT, IEND, PLTE, and all ancillary chunks)."
+---
+
+JPEG and PNG are the two most common raster image formats on the web and in software development. While they share nothing structurally, both use a sequenced, tagged approach to organizing image data — JPEG uses markers and PNG uses chunks — making them well-suited to Binary Internals' tree-based visualization. Binary Internals ships a parser for each format, and both are invoked automatically by file extension. The JPEG parser identifies and annotates every 2-byte marker in the file, and the PNG parser walks every 4-part chunk from the file signature through the mandatory `IEND` terminator.
+
+<Tabs>
+  <Tab title="JPEG">
+    ## JPEG Overview
+
+    JPEG (defined in ITU-T T.81 and ISO/IEC 10918-1) is a lossy compression format for continuous-tone images. A JPEG file is a linear sequence of **markers**, each two bytes long. Most markers introduce a **marker segment** that begins with a 2-byte length field followed by segment data. A few markers are standalone (no segment data follows). The file always begins with the `SOI` marker (`0xFFD8`) and ends with `EOI` (`0xFFD9`).
+
+    ## File Extensions
+
+    **`.jpg`** and **`.jpeg`** — registered by `PluginDescriptorJPEG`, which returns `["jpeg", "jpg"]` from `getExtensions()`.
+
+    ## How the JPEG Parser Works
+
+    The `JPEGFile` parser reads the byte array sequentially. It validates that the file begins with `SOI` (`0xFFD8`). It then scans forward marker by marker. For each position, it checks whether the two bytes form a valid marker code (value must be in `(0xFF00, 0xFFFF)` exclusive). If no marker is found at the current position, the parser scans forward to the next valid marker and wraps the intervening bytes in a `FileData` node (labelled as compressed image data or raw data).
+
+    Each recognized marker produces a typed `Marker` subclass. Markers with an associated length field are fully parsed into structured field nodes. Standalone markers (those with no following length or data) produce a single leaf node.
+
+    ## Marker Code Table
+
+    All JPEG marker codes are defined as constants in `MarkerCode`. Each is two bytes: the first byte is always `0xFF`; the second byte identifies the marker type.
+
+    | Marker | Code | Category | Description |
+    |--------|------|----------|-------------|
+    | `SOI` | `0xFFD8` | Standalone | Start of Image — first bytes of every JPEG |
+    | `EOI` | `0xFFD9` | Standalone | End of Image — last bytes of every JPEG |
+    | `SOF00` | `0xFFC0` | SOF / Huffman | Start of Frame: Baseline DCT |
+    | `SOF01` | `0xFFC1` | SOF / Huffman | Extended sequential DCT |
+    | `SOF02` | `0xFFC2` | SOF / Huffman | Progressive DCT |
+    | `SOF03` | `0xFFC3` | SOF / Huffman | Lossless sequential |
+    | `DHT` | `0xFFC4` | Table | Define Huffman Table(s) |
+    | `DAC` | `0xFFCC` | Table | Define Arithmetic Coding conditioning |
+    | `DQT` | `0xFFDB` | Table | Define Quantization Table(s) |
+    | `DRI` | `0xFFDD` | Table | Define Restart Interval |
+    | `DNL` | `0xFFDC` | Table | Define Number of Lines |
+    | `DHP` | `0xFFDE` | Table | Define Hierarchical Progression |
+    | `EXP` | `0xFFDF` | Table | Expand reference component(s) |
+    | `SOS` | `0xFFDA` | Scan | Start of Scan — compressed data follows |
+    | `APP00` | `0xFFE0` | Application | JFIF / JFXX application segment |
+    | `APP01` | `0xFFE1` | Application | Exif / XMP metadata |
+    | `APP02` | `0xFFE2` | Application | ICC color profile |
+    | `APP13` | `0xFFED` | Application | Photoshop / IPTC metadata |
+    | `APP14` | `0xFFEE` | Application | Adobe color-space marker |
+    | `RST0`–`RST7` | `0xFFD0`–`0xFFD7` | Standalone | Restart markers |
+    | `COM` | `0xFFFE` | Comment | Image comment |
+    | `TEMP` | `0xFF01` | Reserved | Temporary private use (arithmetic coding) |
+
+    ## APP Segment Classes
+
+    The parser ships dedicated subclasses for the most common application segments:
+
+    | Class | Marker |
+    |-------|--------|
+    | `Marker_APP00` | APP0 — JFIF identifier, pixel dimensions, thumbnail |
+    | `Marker_APP01` | APP1 — Exif data, XMP |
+    | `Marker_APP02` | APP2 — ICC color profile (extended) |
+    | `Marker_APP03–APP06` | APP3–APP6 |
+    | `Marker_APP08` | APP8 |
+    | `Marker_APP10` | APP10 |
+    | `Marker_APP12` | APP12 — Ducky / Picture Info |
+    | `Marker_APP13` | APP13 — Photoshop 3.0 / IPTC-NAA |
+    | `Marker_APP14` | APP14 — Adobe marker |
+    | `Marker_APP15` | APP15 |
+
+    ## Marker Structure
+
+    Each non-standalone marker has the following layout:
+
+    ```text
+    [0xFF][marker_type]     2 bytes  marker code
+    [Lp]                    2 bytes  segment length (includes these 2 bytes, excludes the 2-byte marker code)
+    [segment data]          Lp-2 bytes
+    ```
+
+    After `SOS` and restart markers, the raw compressed entropy-coded data follows until the next valid marker is found.
+  </Tab>
+
+  <Tab title="PNG">
+    ## PNG Overview
+
+    PNG (Portable Network Graphics, defined in ISO/IEC 15948 and RFC 2083) is a lossless image format designed as an open replacement for GIF. A PNG file begins with an 8-byte signature and is then divided into a sequence of self-describing **chunks**. Every chunk has the same 12-byte frame (4-byte length + 4-byte type + variable data + 4-byte CRC), making the format straightforward to parse and validate.
+
+    ## File Extension
+
+    **`.png`** — registered by `PluginDescriptorPNG`, which returns `["png"]` from `getExtensions()`.
+
+    ## PNG File Signature
+
+    The first 8 bytes of every PNG file are fixed:
+
+    ```java
+    // From PNGFile.java
+    static final byte[] MAGIC = {
+        (byte) 137, (byte) 80,  (byte) 78,  (byte) 71,
+        (byte) 13,  (byte) 10,  (byte) 26,  (byte) 10
+    };
+    // In hex: 89 50 4E 47 0D 0A 1A 0A
+    // In text: \x89 P N G \r \n \x1A \n
+    ```
+
+    The non-ASCII `0x89` byte guards against 7-bit transmission corruption; the `\r\n` / `\n` sequence detects line-ending conversion; and `0x1A` is the DOS end-of-file character. The parser rejects any file that does not start with these exact bytes.
+
+    The minimum valid PNG file length is 20 bytes: 8 bytes for the signature plus 12 bytes for the smallest possible chunk (4 length + 4 type + 4 CRC with zero data bytes).
+
+    ## Chunk Structure
+
+    Every PNG chunk has four fields:
+
+    ```text
+    [Length]     4 bytes  Number of bytes in ChunkData (NOT counting itself, ChunkType, or CRC)
+    [ChunkType]  4 bytes  ASCII type code (e.g., IHDR, IDAT, IEND)
+    [ChunkData]  variable  Chunk-specific data (may be absent if Length = 0)
+    [CRC]        4 bytes  CRC-32 over ChunkType + ChunkData
+    ```
+
+    The `Chunk` base class stores `Length`, `ChunkType` (as a 4-byte array), `ChunkData`, and `CRC`. Total on-disk size per chunk is `Length + 12`.
+
+    ## Parsed Chunk Types
+
+    | Class | Chunk Type | Description |
+    |-------|-----------|-------------|
+    | `Chunk_IHDR` | `IHDR` | Image Header — **must be first**; contains Width, Height, BitDepth, ColorType, CompressionMethod, FilterMethod, InterlaceMethod |
+    | `Chunk_IDAT` | `IDAT` | Image Data — compressed pixel data (may be split across multiple IDAT chunks) |
+    | `Chunk_IEND` | `IEND` | Image End — **must be last**; Length = 0 |
+    | `Chunk_PLTE` | `PLTE` | Palette — RGB triples for indexed-color images |
+    | `Chunk_bKGD` | `bKGD` | Background Color |
+    | `Chunk_cHRM` | `cHRM` | Primary Chromaticities and White Point |
+    | `Chunk_gAMA` | `gAMA` | Image Gamma |
+    | `Chunk_hIST` | `hIST` | Image Histogram |
+    | `Chunk_iTXt` | `iTXt` | International textual data (UTF-8) |
+    | `Chunk_pHYs` | `pHYs` | Physical Pixel Dimensions |
+    | `Chunk_sBIT` | `sBIT` | Significant Bits |
+    | `Chunk_sPLT` | `sPLT` | Suggested Palette |
+    | `Chunk_tEXt` | `tEXt` | Textual Data (Latin-1) |
+    | `Chunk_tIME` | `tIME` | Image Last-Modification Time |
+    | `Chunk_tRNS` | `tRNS` | Transparency |
+    | `Chunk_zTXt` | `zTXt` | Compressed Textual Data |
+
+    Chunks not recognized by any registered type class are rendered as a generic `Chunk` node showing the raw `ChunkType` ASCII name, `Length`, `ChunkData`, and `CRC`.
+
+    ## IHDR Fields
+
+    `Chunk_IHDR` is the most information-dense chunk. Its 13-byte data field breaks down as:
+
+    | Field | Size | Description |
+    |-------|------|-------------|
+    | `Width` | 4 bytes | Image width in pixels (must be > 0) |
+    | `Height` | 4 bytes | Image height in pixels (must be > 0) |
+    | `BitDepth` | 1 byte | Bits per sample: 1, 2, 4, 8, or 16 (not all valid for all color types) |
+    | `ColorType` | 1 byte | Color model: 0 = Greyscale, 2 = RGB, 3 = Indexed, 4 = Greyscale+Alpha, 6 = RGBA |
+    | `CompressionMethod` | 1 byte | Must be 0 (deflate with 32 KB sliding window) |
+    | `FilterMethod` | 1 byte | Must be 0 (adaptive filtering with five filter types) |
+    | `InterlaceMethod` | 1 byte | 0 = no interlace, 1 = Adam7 interlace |
+
+    The `Chunk_IHDR` parser also stores `ColorType` so it can be passed to `Chunk_tRNS`, which has a `ColorType`-dependent structure.
+
+    ## Parse Flow
+
+    ```text
+    PNGFile(Path)
+      ├── Validate 8-byte MAGIC
+      └── Loop until end of file:
+            Chunk = parseChunk(stream, colorType)
+              ├── Read 4-byte Length
+              ├── Read 4-byte ChunkType
+              ├── Skip Length bytes of data
+              ├── Skip 4-byte CRC
+              └── Match ChunkType against registered Chunk subclasses
+                    → Chunk_IHDR / Chunk_IDAT / Chunk_IEND / Chunk_PLTE
+                    → Chunk_bKGD / Chunk_cHRM / Chunk_gAMA / ...
+                    → Chunk (generic fallback)
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+  The PNG specification is maintained at [libpng.org](http://www.libpng.org/pub/png/spec/). The JPEG specification is ITU-T T.81 / ISO/IEC 10918-1, available from the respective standards bodies.
+</Info>

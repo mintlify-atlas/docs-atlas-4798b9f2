@@ -1,0 +1,123 @@
+---
+title: "Configure the Binary Internals Web Server"
+sidebarTitle: "Configuration"
+description: "All environment variables for configuring BinaryInternalsWeb, their defaults, Docker-specific overrides, CORS settings, and security recommendations."
+---
+
+The Binary Internals Web Server is configured entirely through environment variables — there is no configuration file to manage. Set variables before starting the process (or pass them with `docker run -e`) and the server picks them up at startup via `WebServer.Config.fromEnv()`. Every variable has a sensible default so you can run the server without setting anything at all.
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `127.0.0.1` (`0.0.0.0` in Docker) | Network address the server listens on |
+| `PORT` | `8080` | TCP port the server listens on |
+| `MAX_UPLOAD_MB` | `20` | Maximum size of a single uploaded file, in megabytes |
+| `MAX_CONCURRENT_PARSES` | Number of available processors | Maximum number of files parsed in parallel |
+| `PARSE_TIMEOUT_SECONDS` | `30` | Seconds before an in-progress parse is cancelled with a `504` response |
+| `CORS_ORIGIN` | `*` | Value of the `Access-Control-Allow-Origin` header; set to empty string to disable CORS entirely |
+| `TMPDIR` | `java.io.tmpdir` system property | Directory used for temporary copies of uploaded files during parsing |
+
+<Note>
+In the Docker image, `HOST` defaults to `0.0.0.0` so the server accepts connections from outside the container. When running directly on the host with `java -jar`, `HOST` defaults to `127.0.0.1` (loopback only). Override it explicitly if you need a different binding in either context.
+</Note>
+
+## Running with Docker
+
+Build the image from the repository root, then run it with any overrides you need:
+
+```bash
+docker build -f BinaryInternalsWeb/Dockerfile -t binaryinternals-web .
+```
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e MAX_UPLOAD_MB=50 \
+  -e PARSE_TIMEOUT_SECONDS=60 \
+  -e CORS_ORIGIN=https://myapp.example.com \
+  binaryinternals-web
+```
+
+## Running with Docker Compose
+
+The supplied `docker-compose.yml` sets recommended defaults and resource limits in one place:
+
+```bash
+# Start (builds the image if needed)
+docker compose -f BinaryInternalsWeb/docker-compose.yml up -d --build
+
+# Follow logs
+docker compose -f BinaryInternalsWeb/docker-compose.yml logs -f
+
+# Stop
+docker compose -f BinaryInternalsWeb/docker-compose.yml down
+```
+
+Edit the `environment:` block in `docker-compose.yml` to change settings without retyping `docker run` flags each time.
+
+## Running without Docker
+
+After building with `mvn install`, start the JAR directly and pass variables in the environment:
+
+```bash
+HOST=0.0.0.0 PORT=9090 MAX_UPLOAD_MB=50 java -jar BinaryInternalsWeb-3.7.jar
+```
+
+Or as a named Java module:
+
+```bash
+java -p BinaryInternalsWeb/target/libs:BinaryInternalsWeb/target/BinaryInternalsWeb-3.7.jar \
+     -m org.binaryinternals.web/org.binaryinternals.web.WebServer
+```
+
+## CORS
+
+By default, `CORS_ORIGIN=*` allows any browser origin to call the API, which is convenient for local development and public read-only deployments. The server adds these headers to every `/api/` response when CORS is enabled:
+
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
+```
+
+`OPTIONS` preflight requests receive a `204 No Content` response immediately.
+
+To restrict access to a single origin, set the exact origin value:
+
+```bash
+CORS_ORIGIN=https://myapp.example.com
+```
+
+To disable CORS headers entirely (for server-side-only usage), set the variable to an empty string:
+
+```bash
+CORS_ORIGIN=
+```
+
+## Security
+
+### Recommended Docker flags
+
+The README and the default `docker-compose.yml` both apply these constraints to limit the blast radius of a malicious or pathological input file:
+
+```bash
+docker run --rm -p 8080:8080 \
+  --read-only \
+  --tmpfs /tmp \
+  --memory 512m \
+  --cpus 1 \
+  binaryinternals-web
+```
+
+| Flag | Purpose |
+|---|---|
+| `--read-only` | Container filesystem is read-only; only `/tmp` is writable |
+| `--tmpfs /tmp` | Temporary uploads live in memory, not on disk |
+| `--memory 512m` | Caps heap + native memory so an oversized file cannot exhaust the host |
+| `--cpus 1` | Prevents a runaway parse from starving other workloads on the host |
+
+The `docker-compose.yml` also drops all Linux capabilities (`cap_drop: ALL`) and sets `no-new-privileges:true` for defence in depth.
+
+<Warning>
+Binding `HOST=0.0.0.0` exposes the server directly on the network. In production, keep `HOST=127.0.0.1` and place a reverse proxy (nginx, Caddy, etc.) in front to handle TLS termination, rate limiting, and access control. Never expose the raw server port to the internet without a proxy.
+</Warning>

@@ -1,0 +1,134 @@
+---
+title: "Binary Internals Architecture and Module Structure"
+sidebarTitle: "Architecture"
+description: "Explore the multi-module Maven structure of Binary Internals, how modules depend on each other, and how the plugin system connects format parsers."
+---
+
+Binary Internals is designed around a clean modular architecture: every format parser lives in its own Maven module, all modules depend solely on a single `CommonLib` abstraction layer, and two consumer modules (the Swing desktop viewer and the HTTP web server) discover available parsers at runtime through Java's `ServiceLoader` mechanism. The result is a codebase with **zero third-party runtime dependencies** — only the JDK is required to run any part of the project.
+
+## Maven Module Structure
+
+The root `pom.xml` declares all sub-modules. Each module compiles to a single JAR and carries its own `module-info.java` descriptor.
+
+| Module | Purpose | Status |
+|---|---|---|
+| `CommonLib` | Core abstractions shared by every other module | Stable |
+| `BinaryInternalsViewer` | Swing desktop application | Stable |
+| `BinaryInternalsWeb` | Embedded HTTP server and REST API | Stable |
+| `FormatBMP` | BMP image parser | Stable |
+| `FormatCLASS` | Java `.class` file parser | Stable |
+| `FormatJPEG` | JPEG image parser | Stable |
+| `FormatPNG` | PNG image parser | Stable |
+| `FormatZIP` | ZIP archive parser | Stable |
+| `FormatDEX` | Android DEX file parser | In development |
+| `FormatELF` | ELF binary parser | In development |
+| `FormatPDF` | PDF document parser | On hold |
+
+### CommonLib
+
+`CommonLib` is the foundation that every other module builds on. It exports the `org.binaryinternals.commonlib` package and transitively re-exports `java.desktop` and `java.logging` so that format modules do not need to repeat those dependencies. Key types it provides:
+
+- **`FileFormat`** — abstract base class for all format parsers; holds the raw `fileByteArray` and defines the `generateTreeNode` contract.
+- **`PluginDescriptor`** — service provider interface that the `ServiceLoader` discovers; maps file extensions to a `FileFormat` subclass.
+- **`PosDataInputStream`** — position-tracking byte reader built on top of `DataInputStream`; exposes `getPos()` for offset queries and little-endian read helpers.
+- **`JTreeNodeFileComponent`** — value object attached to each `DefaultMutableTreeNode`; carries `startPos`, `length`, `text`, optional `icon`, and optional HTML `description`.
+- **`FileComponent`** — lightweight `startPos` / `length` pair used by individual parsed fields inside a format module.
+- **`GenerateTreeNode`** — interface for parsed sub-components that know how to add themselves to the tree.
+- **`Icons`** — enum of all built-in node icons available to format parsers.
+
+### BinaryInternalsViewer
+
+The desktop module (`org.binaryinternals.app`) declares `uses org.binaryinternals.commonlib.PluginDescriptor` in its `module-info.java`. At startup it calls `ServiceLoader.load(PluginDescriptor.class)` to obtain every format plugin on the module path, builds a file-extension filter from the results, and renders the parsed tree in a Swing `JTree`.
+
+### BinaryInternalsWeb
+
+The web module (`org.binaryinternals.web`) follows exactly the same `uses` / `ServiceLoader` pattern. It embeds the JDK's built-in `com.sun.net.httpserver` (via `requires jdk.httpserver`) to expose a REST API without pulling in any external web framework. `ParseService` wraps the `ServiceLoader` call and also converts the `DefaultMutableTreeNode` tree to JSON.
+
+## Dependency Flow
+
+```text
+FormatBMP  ─┐
+FormatCLASS─┤
+FormatJPEG ─┤  requires  ┌──────────┐
+FormatPNG  ─┼──────────► │ CommonLib│
+FormatZIP  ─┤            └────┬─────┘
+FormatDEX  ─┤                 │ required by
+FormatELF  ─┘                 ▼
+                    ┌─────────────────────┐
+                    │ BinaryInternalsViewer│
+                    │ BinaryInternalsWeb   │
+                    └─────────────────────┘
+```
+
+Format modules depend **only** on `CommonLib`. Neither the Viewer nor the Web module is listed as a dependency of any format module — the relationship is inverted through `ServiceLoader`.
+
+## Plugin Discovery via ServiceLoader
+
+Each format module registers itself as a `PluginDescriptor` provider using the Java Platform Module System `provides` directive in `module-info.java`:
+
+```java
+// FormatBMP/src/main/java/module-info.java
+module org.binaryinternals.formatbmp {
+    requires transitive org.binaryinternals.commonlib;
+
+    exports org.binaryinternals.format.bmp;
+
+    provides org.binaryinternals.commonlib.PluginDescriptor
+        with org.binaryinternals.format.bmp.PluginDescriptorBMP;
+}
+```
+
+The consumer module declares it uses the service:
+
+```java
+// BinaryInternalsViewer / BinaryInternalsWeb module-info.java
+uses org.binaryinternals.commonlib.PluginDescriptor;
+```
+
+At runtime, `ServiceLoader.load(PluginDescriptor.class)` returns one instance per `provides` directive found across all modules on the module path. Adding a new format to the application is therefore a matter of dropping the format JAR onto the module path — no code change is needed in the viewer or web server.
+
+## Data Flow
+
+The path from raw bytes to a visible tree follows four steps:
+
+1. **Read** — the file's bytes are loaded into `FileFormat.fileByteArray` through the `Path`-accepting constructor.
+2. **Parse** — the `FileFormat` subclass reads fields from a `PosDataInputStream` wrapping `fileByteArray`, populating typed Java fields.
+3. **Tree build** — `generateTreeNode(DefaultMutableTreeNode parentNode)` is called; the parser creates `JTreeNodeFileComponent` value objects and attaches them as child nodes.
+4. **Render or serialize** — the Swing viewer displays the `DefaultMutableTreeNode` tree directly, while `BinaryInternalsWeb`'s `ParseService.toJson()` walks the same tree and emits JSON.
+
+Each JSON node looks like:
+
+```json
+{
+  "text": "magic: CAFEBABE",
+  "start": 0,
+  "length": 4,
+  "icon": "Magic",
+  "description": "<p>The class file magic number.</p>",
+  "children": []
+}
+```
+
+The `icon` and `description` fields are omitted when absent; `children` is omitted for leaf nodes.
+
+## Key Interfaces
+
+```java
+// The base class every format parser extends
+public abstract class FileFormat {
+    public final byte[] fileByteArray;
+    public abstract String getContentTabName();
+    public abstract void generateTreeNode(DefaultMutableTreeNode parentNode);
+}
+
+// The service provider interface every format plugin implements
+public interface PluginDescriptor {
+    String getExtensionDescription();
+    List<String> getExtensions();
+    Class<? extends FileFormat> getFileFormatClass();
+}
+```
+
+<Note>
+Binary Internals carries **zero third-party runtime dependencies** beyond the JDK. The only compile-time-only dependency declared in the root POM is `spotbugs-annotations`, which is scoped `provided` and declared `requires static` in `module-info.java` so it is never packaged into the distributed JARs.
+</Note>

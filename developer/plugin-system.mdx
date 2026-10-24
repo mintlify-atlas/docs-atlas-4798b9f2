@@ -1,0 +1,244 @@
+---
+title: "Implementing a Binary Format Plug-in for Binary Internals"
+sidebarTitle: "Plugin System"
+description: "Step-by-step guide to implementing the PluginDescriptor and FileFormat interfaces to add support for a new binary format to Binary Internals."
+---
+
+If you need Binary Internals to understand a file format it does not yet support, you can add it yourself by writing a format plug-in — a self-contained Maven module that implements two interfaces from `CommonLib`. Once the module is on the module path, both the desktop viewer and the web server automatically discover and use it without any changes to their code.
+
+## The Two Interfaces
+
+Every format plug-in must implement:
+
+- **`PluginDescriptor`** — a service provider record that advertises the file extension(s) and the `FileFormat` class to instantiate.
+- **`FileFormat`** — an abstract class whose constructor parses the raw bytes and whose `generateTreeNode` method builds the displayable tree.
+
+<Steps>
+
+### Create a Maven Module
+
+Create a new directory alongside the existing format modules (for example, `FormatFOO/`) and add a minimal `pom.xml` that inherits from the root POM and depends on `CommonLib`:
+
+```xml
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.binaryinternals</groupId>
+        <artifactId>binaryinternals</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>FormatFOO</artifactId>
+    <name>Format FOO</name>
+    <description>Parser for the FOO binary format</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.binaryinternals</groupId>
+            <artifactId>CommonLib</artifactId>
+            <version>${revision}</version>
+        </dependency>
+    </dependencies>
+</project>
+```
+
+Then add the new `<module>FormatFOO</module>` line to the root `pom.xml` `<modules>` section.
+
+### Implement `PluginDescriptor`
+
+Create `PluginDescriptorFOO.java` in your module's source tree. The interface requires three methods. Here is the real implementation from `FormatBMP` as a pattern to follow:
+
+```java
+package org.binaryinternals.format.foo;
+
+import java.util.List;
+import org.binaryinternals.commonlib.FileFormat;
+import org.binaryinternals.commonlib.PluginDescriptor;
+
+public class PluginDescriptorFOO implements PluginDescriptor {
+
+    public PluginDescriptorFOO() {
+    }
+
+    @Override
+    public String getExtensionDescription() {
+        // Shown in the file-open dialog and the REST API /api/v1/formats response
+        return "FOO Binary Format (*.foo)";
+    }
+
+    @Override
+    public List<String> getExtensions() {
+        // One or more lowercase extensions without the leading dot
+        return List.of("foo");
+    }
+
+    @Override
+    public Class<? extends FileFormat> getFileFormatClass() {
+        return FOOFile.class;
+    }
+}
+```
+
+For comparison, the real `PluginDescriptorBMP` from the project returns `"Bitmap Images (*.bmp)"` for the description, `List.of("bmp")` for extensions, and `BMPFile.class` for the format class. The real `PluginDescriptorClass` similarly returns `"Java class File (*.class)"`, `List.of("class")`, and `ClassFile.class`.
+
+### Implement `FileFormat`
+
+Extend `FileFormat` and implement the two abstract methods. Use `PosDataInputStream` (wrapped around a `PosByteArrayInputStream`) to read the file bytes in sequence.
+
+```java
+package org.binaryinternals.format.foo;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import javax.swing.tree.DefaultMutableTreeNode;
+import org.binaryinternals.commonlib.FileFormat;
+import org.binaryinternals.commonlib.JTreeNodeFileComponent;
+import org.binaryinternals.commonlib.PosByteArrayInputStream;
+import org.binaryinternals.commonlib.PosDataInputStream;
+
+public class FOOFile extends FileFormat {
+
+    /** First four bytes: the magic number identifying FOO files. */
+    public final int magic;
+    /** Version field at bytes 4–5. */
+    public final short version;
+
+    public FOOFile(final Path file) throws IOException {
+        super(file);   // reads all bytes into this.fileByteArray
+
+        PosDataInputStream input = new PosDataInputStream(
+                new PosByteArrayInputStream(this.fileByteArray));
+
+        this.magic   = input.readInt();    // getPos() is now 4
+        this.version = input.readShort();  // getPos() is now 6
+    }
+
+    @Override
+    public String getContentTabName() {
+        // Label shown on the content tab in the Swing viewer
+        return "FOO File";
+    }
+
+    @Override
+    public void generateTreeNode(final DefaultMutableTreeNode parentNode) {
+        JTreeNodeFileComponent magicComp = new JTreeNodeFileComponent(
+                0,                                     // startPos
+                4,                                     // length in bytes
+                String.format("magic = 0x%08X", this.magic));
+        magicComp.setDescription("<p>The magic number that identifies this file as a FOO binary.</p>");
+        parentNode.add(new DefaultMutableTreeNode(magicComp));
+
+        parentNode.add(new DefaultMutableTreeNode(new JTreeNodeFileComponent(
+                4,
+                2,
+                String.format("version = %d", this.version))));
+    }
+}
+```
+
+#### `PosDataInputStream` reference
+
+`PosDataInputStream` extends `DataInputStream` and additionally tracks the current byte offset:
+
+| Method | Description |
+|---|---|
+| `getPos()` | Returns the current absolute byte offset in the stream |
+| `getOffset()` | Returns the base offset for partial / sub-streams |
+| `readShortInLittleEndian()` | Reads a `short` in little-endian order |
+| `readIntInLittleEndian()` | Reads an `int` in little-endian order |
+| `readUnsignedInt()` | Reads a 4-byte value as an unsigned `long` |
+| `readUnsignedIntInLittleEndian()` | Unsigned little-endian `int` as `long` |
+| `readLongInLittleEndian()` | Reads a `long` in little-endian order |
+| `readASCII(int length)` | Reads `length` bytes as an ISO-8859-1 string |
+| `readASCII()` | Reads bytes until a null terminator |
+| `getPartialStream(int startPos, int length)` | Returns a sub-stream starting at `startPos` |
+
+#### `JTreeNodeFileComponent` reference
+
+`JTreeNodeFileComponent` is the value object stored in each `DefaultMutableTreeNode`. Three required fields are set in the constructor; two optional fields can be set afterwards:
+
+| Field | Setter / Constructor | Description |
+|---|---|---|
+| `startPos` | Constructor arg 1 | Byte offset where this component starts |
+| `length` | Constructor arg 2 | Number of bytes this component covers |
+| `text` | Constructor arg 3 | Label shown in the tree (must not be null or empty) |
+| `icon` | `setIcon(Icon)` or overloaded constructor | Tree node icon from the `Icons` enum |
+| `description` | `setDescription(String)` or overloaded constructor | HTML string shown in the description panel |
+
+A complete `generateTreeNode` body follows the pattern from the BMP `BitmapFileHeader`:
+
+```java
+@Override
+public void generateTreeNode(DefaultMutableTreeNode parentNode) {
+    JTreeNodeFileComponent comp = new JTreeNodeFileComponent(
+        0,           // startPos
+        4,           // length in bytes
+        "magic: CAFEBABE"
+    );
+    parentNode.add(new DefaultMutableTreeNode(comp));
+}
+```
+
+For nested structures, add an intermediate node and then add children to it:
+
+```java
+DefaultMutableTreeNode sectionNode;
+JTreeNodeFileComponent sectionComp = new JTreeNodeFileComponent(
+        headerStart, headerLength, "File Header");
+parentNode.add(sectionNode = new DefaultMutableTreeNode(sectionComp));
+
+// child fields hang off sectionNode, not parentNode
+sectionNode.add(new DefaultMutableTreeNode(
+        new JTreeNodeFileComponent(headerStart, 2, "signature = BM")));
+```
+
+### Register the Plugin
+
+Declare the service provider in your module's `module-info.java`. This is the file the `ServiceLoader` reads to find your implementation:
+
+```java
+module org.binaryinternals.formatfoo {
+    requires transitive org.binaryinternals.commonlib;
+
+    exports org.binaryinternals.format.foo;
+
+    provides org.binaryinternals.commonlib.PluginDescriptor
+        with org.binaryinternals.format.foo.PluginDescriptorFOO;
+}
+```
+
+The `requires transitive org.binaryinternals.commonlib` line ensures that callers of your module automatically have access to `CommonLib` types such as `FileFormat` and `JTreeNodeFileComponent`.
+
+### Build and Test
+
+Build the entire project from the repository root:
+
+```bash
+mvn install
+```
+
+Then launch the desktop viewer with your new module on the module path. The simplest approach is to run the fat JAR produced by `BinaryInternalsViewer`, which bundles all modules:
+
+```bash
+java -jar BinaryInternalsViewer/target/BinaryInternalsViewer-3.7-*.jar
+```
+
+Open **File → Open…** and pick a `.foo` file. Your module will be loaded via `ServiceLoader` and the parsed tree will appear in the left panel. Selecting a node highlights the corresponding bytes in the hex view and shows the HTML description in the bottom panel.
+
+To verify the web API also picks up the new plugin, start the web server and call the formats endpoint:
+
+```bash
+java -jar BinaryInternalsWeb/target/BinaryInternalsWeb-3.7.jar &
+curl http://localhost:8080/api/v1/formats
+```
+
+The JSON response will include an entry for `"FOO Binary Format (*.foo)"`.
+
+</Steps>
+
+<Tip>
+The best reference implementations are the modules that ship with the project. `FormatBMP` is the simplest — `BMPFile`, `BitmapFileHeader`, `DIBHeader`, `ColorTable`, and `PixelArray` each implement `GenerateTreeNode` individually, keeping parsing logic close to tree-building logic. `FormatCLASS` is the most complete and demonstrates recursive sub-component trees for a complex binary format.
+</Tip>

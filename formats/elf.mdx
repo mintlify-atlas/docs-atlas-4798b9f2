@@ -1,0 +1,145 @@
+---
+title: "ELF Binary Format — Binary Internals Parser"
+sidebarTitle: "ELF"
+description: "How Binary Internals parses ELF binaries: the 16-byte identification block, ELF64 header fields, file types, machine architectures, and current development status."
+---
+
+ELF (Executable and Linkable Format) is the standard binary format for executables, shared libraries, object files, and core dumps on Linux and other Unix-like operating systems. It is used across a wide range of CPU architectures including x86, x86-64, ARM, AArch64, RISC-V, MIPS, PowerPC, and SPARC. Binary Internals includes an `ElfFile` parser that reads the 16-byte identification block and the 64-bit ELF header, exposing each field in an annotated, interactive tree. The parser currently assumes a 64-bit x86-based architecture (`Elf64_Ehdr`), which is the most common case for modern Linux systems.
+
+<Warning>
+  The ELF parser is **still in active development**. Currently, only the 16-byte identification block (`e_ident`) and the ELF64 header (`Elf64_Ehdr`) are parsed. Program headers, section headers, and the section content (`.text`, `.data`, symbol tables, etc.) are not yet exposed in the tree.
+</Warning>
+
+## File Extensions
+
+Registered by `PluginDescriptorELF`, which returns the following from `getExtensions()`:
+
+```text
+axf, bin, elf, o, prx, puff, so
+```
+
+The full description string is: `"Executable and Linkable Format (*.axf, *.bin, *.elf, *.o, *.prx, *.puff, *.so)"`.
+
+## What Is an ELF File?
+
+ELF is defined by the [System V ABI](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format) and extended by individual processor supplements. It serves four main file types:
+
+| Type | Constant | Description |
+|------|----------|-------------|
+| Relocatable | `ET_REL` (0x01) | Object file produced by the compiler, not yet linked |
+| Executable | `ET_EXEC` (0x02) | Standalone executable with fixed virtual addresses |
+| Shared object | `ET_DYN` (0x03) | Shared library or position-independent executable |
+| Core file | `ET_CORE` (0x04) | Process memory dump |
+
+## ELF Identification Block (`e_ident`, 16 bytes)
+
+The first 16 bytes of every ELF file form the identification block, parsed by the `Identification` class. The magic number `0x7F454C46` (i.e., `0x7F` followed by the ASCII characters `E`, `L`, `F`) must appear at offset 0.
+
+```text
+Offset  Size  Field           Description
+------  ----  -----------     ------------------------------------------
+0       4     EI_MAG          Magic: 0x7F 0x45 0x4C 0x46 (0x7FELF)
+4       1     EI_CLASS        ELF class: 32-bit (1) or 64-bit (2)
+5       1     EI_DATA         Endianness: little (1) or big (2)
+6       1     EI_VERSION      ELF version: must be 1 (EV_CURRENT)
+7       1     EI_OSABI        Target OS/ABI
+8       1     EI_ABIVERSION   ABI version (interpretation depends on OS/ABI)
+9       7     EI_PAD          Padding (currently unused, set to zero)
+```
+
+### EI_CLASS values
+
+| Value | Constant | Meaning |
+|-------|----------|---------|
+| 0 | `ELFCLASSNONE` | Invalid class |
+| 1 | `ELFCLASS32` | 32-bit ELF |
+| 2 | `ELFCLASS64` | 64-bit ELF |
+
+### EI_DATA values (endianness)
+
+| Value | Constant | Meaning |
+|-------|----------|---------|
+| 1 | `ELFDATA2LSB` | Little-endian |
+| 2 | `ELFDATA2MSB` | Big-endian |
+
+### EI_OSABI values (selected)
+
+| Value | Constant | Target OS/ABI |
+|-------|----------|---------------|
+| 0x00 | `ELFOSABI_NONE` | System V / unspecified |
+| 0x03 | `ELFOSABI_LINUX` | Linux |
+| 0x09 | `FreeBSD` | FreeBSD |
+| 0x0C | `OpenBSD` | OpenBSD |
+| 0x41 | `ELFOSABI_ARM_FDPIC` | ARM FDPIC platform |
+
+## ELF64 Header (`Elf64_Ehdr`)
+
+After the 16-byte identification block, the `Elf64_Ehdr` structure occupies the next 48 bytes. The parser reads each field in the endianness indicated by `EI_DATA`.
+
+```c
+typedef struct elf64_hdr {
+    unsigned char  e_ident[EI_NIDENT];   // parsed separately as Identification
+    Elf64_Half     e_type;               // Object file type
+    Elf64_Half     e_machine;            // Target ISA
+    Elf64_Word     e_version;            // ELF version (must be 1)
+    Elf64_Addr     e_entry;              // Entry point virtual address
+    Elf64_Off      e_phoff;              // Program header table file offset
+    Elf64_Off      e_shoff;              // Section header table file offset
+    Elf64_Word     e_flags;              // Processor-specific flags
+    Elf64_Half     e_ehsize;             // ELF header size in bytes (64)
+    Elf64_Half     e_phentsize;          // Program header entry size
+    Elf64_Half     e_phnum;              // Number of program header entries
+    Elf64_Half     e_shentsize;          // Section header entry size
+    Elf64_Half     e_shnum;              // Number of section header entries
+    Elf64_Half     e_shstrndx;           // Section name string table index
+} Elf64_Ehdr;
+```
+
+### e_machine — Target Instruction Set Architecture
+
+The `e_machine` field identifies the target CPU. Binary Internals recognizes the following values via the `ELF_Machine` enum:
+
+| Value | Constant | Architecture |
+|-------|----------|-------------|
+| 0x02 | `SPARC` | SPARC |
+| 0x03 | `x86` | x86 (IA-32) |
+| 0x08 | `MIPS` | MIPS |
+| 0x14 | `PowerPC` | PowerPC (32-bit) |
+| 0x15 | `PowerPC64` | PowerPC (64-bit) |
+| 0x16 | `S390` | IBM S390 / z/Architecture |
+| 0x28 | `ARM` | ARM (32-bit) |
+| 0x3E | `amd64` | x86-64 / AMD64 |
+| 0xB7 | `AArch64` | ARM 64-bit (AArch64) |
+| 0xF3 | `RISC_V` | RISC-V |
+
+## Parse Flow
+
+```text
+ElfFile(Path)
+  ├── Identification(input)         ← reads first 16 bytes (e_ident)
+  │     ├── EI_MAG  (4 bytes)       magic = 0x7F454C46
+  │     ├── EI_CLASS (1 byte)       ELFCLASS32 or ELFCLASS64
+  │     ├── EI_DATA  (1 byte)       endianness
+  │     ├── EI_VERSION (1 byte)     EV_CURRENT = 1
+  │     ├── EI_OSABI (1 byte)       OS/ABI identifier
+  │     ├── EI_ABIVERSION (1 byte)  ABI version
+  │     └── EI_PAD (7 bytes)        reserved / zero
+  └── Elf64_Ehdr(inputElf)          ← reads next 48 bytes using detected endianness
+        ├── e_type       (2 bytes)
+        ├── e_machine    (2 bytes)
+        ├── e_version    (4 bytes)
+        ├── e_entry      (8 bytes)
+        ├── e_phoff      (8 bytes)
+        ├── e_shoff      (8 bytes)
+        ├── e_flags      (4 bytes)
+        ├── e_ehsize     (2 bytes)
+        ├── e_phentsize  (2 bytes)
+        ├── e_phnum      (2 bytes)
+        ├── e_shentsize  (2 bytes)
+        ├── e_shnum      (2 bytes)
+        └── e_shstrndx   (2 bytes)
+```
+
+<Info>
+  For the full ELF specification, see the [Executable and Linkable Format article on Wikipedia](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format) and the Linux kernel header [`include/uapi/linux/elf.h`](https://github.com/torvalds/linux/blob/master/include/uapi/linux/elf.h).
+</Info>

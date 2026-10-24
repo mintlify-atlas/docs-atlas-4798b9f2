@@ -1,0 +1,131 @@
+---
+title: "Java .class File Format — Binary Internals Parser"
+sidebarTitle: "Java .class"
+description: "How Binary Internals parses Java .class files: magic number, constant pool, access flags, fields, methods, attributes, and JVM versions up to Java 25."
+---
+
+The Java `.class` file parser is the original and most mature format in Binary Internals. It was first published as the standalone "Java Class Viewer" project and was renamed and merged into Binary Internals in April 2021. The parser implements the full JVM ClassFile structure as defined in the Java Virtual Machine Specification and supports every class file version from JDK 1.0.2 through Java 25 (major version 69). When you open a `.class` file, Binary Internals validates the magic number `0xCAFEBABE`, determines the Java SE release from the major/minor version pair, and builds an interactive tree covering every field in the file.
+
+## File Extension
+
+**`.class`** — registered by `PluginDescriptorClass` which returns `["class"]` from `getExtensions()`.
+
+## ClassFile Structure
+
+The parser models the JVM specification's `ClassFile` structure exactly. Field names in the source code match the specification names:
+
+```text
+ClassFile {
+    u4 magic;
+    u2 minor_version;
+    u2 major_version;
+    u2 constant_pool_count;
+    cp_info constant_pool[constant_pool_count-1];
+    u2 access_flags;
+    u2 this_class;
+    u2 super_class;
+    u2 interfaces_count;
+    u2 interfaces[interfaces_count];
+    u2 fields_count;
+    field_info fields[fields_count];
+    u2 methods_count;
+    method_info methods[methods_count];
+    u2 attributes_count;
+    attribute_info attributes[attributes_count];
+}
+```
+
+## What the Parser Exposes
+
+<Steps>
+  <Step title="Magic Number">
+    The first four bytes must equal `0xCAFEBABE`. The parser reads them as a `u4` field named `magic` and throws `FileFormatException` if the value does not match `java.lang.classfile.ClassFile.MAGIC_NUMBER`. This value is shown in the tree as `magic: CAFEBABE`.
+  </Step>
+  <Step title="Version (major_version / minor_version)">
+    Two `u2` fields immediately follow the magic number. The major version determines the minimum JDK required to load the class. The parser calls `ClassFileFormatVersion.fromMajor(major_version)` to resolve the human-readable Java SE release name.
+
+    ```text
+    Version ranges:
+      45.x  →  JDK 1.0.2 / 1.1
+      46.0  →  Java 1.2
+      ...
+      69.0  →  Java SE 25
+    ```
+
+    When `minor_version` is `65535` and `major_version` is 56 or above, the class uses **preview features** for that release. The parser surfaces this through `isPreview()` and includes it in `getVersionText()`, for example: `69.0 (Java SE 25, preview features)`.
+  </Step>
+  <Step title="Constant Pool">
+    `constant_pool_count` (u2) gives the number of entries. The parser reads `constant_pool_count - 1` `cp_info` items starting at index 1. The `ConstantType.parse()` method dispatches each entry by its tag byte. `CONSTANT_Long` and `CONSTANT_Double` entries occupy two consecutive indices; the parser handles this automatically.
+
+    Supported constant types include: `CONSTANT_Utf8`, `CONSTANT_Integer`, `CONSTANT_Float`, `CONSTANT_Long`, `CONSTANT_Double`, `CONSTANT_Class`, `CONSTANT_String`, `CONSTANT_Fieldref`, `CONSTANT_Methodref`, `CONSTANT_InterfaceMethodref`, `CONSTANT_NameAndType`, `CONSTANT_MethodHandle`, `CONSTANT_MethodType`, `CONSTANT_Dynamic`, `CONSTANT_InvokeDynamic`, `CONSTANT_Module`, and `CONSTANT_Package`.
+  </Step>
+  <Step title="Class Declaration">
+    Four `u2` fields follow the constant pool:
+    - `access_flags` — a bitmask of `ACC_PUBLIC`, `ACC_FINAL`, `ACC_SUPER`, `ACC_INTERFACE`, `ACC_ABSTRACT`, `ACC_SYNTHETIC`, `ACC_ANNOTATION`, `ACC_ENUM`, and `ACC_MODULE`.
+    - `this_class` — index into the constant pool pointing to a `CONSTANT_Class_info` that names this class.
+    - `super_class` — index to the superclass `CONSTANT_Class_info`, or `0` for `java.lang.Object` and `module-info`.
+    - `interfaces_count` followed by `interfaces[interfaces_count]` — constant pool indices of implemented interfaces.
+  </Step>
+  <Step title="Fields">
+    `fields_count` (u2) is followed by `fields_count` `field_info` structures. Each `field_info` contains its own `access_flags`, `name_index`, `descriptor_index`, `attributes_count`, and `attributes` array.
+  </Step>
+  <Step title="Methods">
+    `methods_count` (u2) is followed by `methods_count` `method_info` structures with the same layout as fields. When you click a `Code_attribute` node in the tree, an additional **Opcode** tab appears showing disassembled JVM bytecode.
+  </Step>
+  <Step title="Attributes">
+    `attributes_count` (u2) is followed by `attributes_count` `attribute_info` structures at the class level. The parser dispatches each attribute by its name string (resolved from `attribute_name_index` in the constant pool). Class-level attributes include `SourceFile`, `InnerClasses`, `BootstrapMethods`, `Module`, `NestHost`, `NestMembers`, `Record`, `PermittedSubclasses`, and others defined in the JVM specification.
+  </Step>
+</Steps>
+
+## JVM Version Reference
+
+The `getVersionText()` method produces a string in the format `<major>.<minor> (<Java SE release>)`. A selection of major version values:
+
+| Major Version | Java SE Release |
+|---------------|----------------|
+| 45 | 1.0.2 / 1.1 |
+| 46 | 1.2 |
+| 47 | 1.3 |
+| 48 | 1.4 |
+| 49 | 5.0 |
+| 50 | 6 |
+| 51 | 7 |
+| 52 | 8 |
+| 55 | 11 |
+| 61 | 17 |
+| 65 | 21 |
+| 69 | 25 |
+
+<Info>
+  If a class file carries a major version not known to the running JDK (for example, a future version), `getVersion()` returns `Optional.empty()` and `getJavaSEText()` returns `"unknown Java SE version"`.
+</Info>
+
+## Class File Verification
+
+The `ClassFile` class exposes a `verify()` method that runs the JDK's built-in `ClassFile` API verifier against the parsed bytes. It returns a `Verification` record containing two lists:
+
+- `errors` — actual verification failures.
+- `unresolved` — classes that could not be found during verification (incomplete but not necessarily wrong).
+
+The `summary()` helper returns `"passed"`, `"N error(s)"`, or `"incomplete, N class(es) not found"`.
+
+<Note>
+  Verification requires that the class file's dependencies (superclasses, interfaces, referenced types) are resolvable. Binary Internals attempts to locate them relative to the opened file's directory using its package path, but unresolved types are reported separately from hard errors.
+</Note>
+
+## Tree Tabs
+
+When a node is selected in the Binary Internals viewer, additional tabs may appear in the content panel:
+
+| Clicked Node Prefix | Extra Tab |
+|---------------------|-----------|
+| `constant_pool [...]` | **Constant Pool** — a full text report of all CP entries |
+| `fields [...]` | **Fields** — a summary of all field names and descriptors |
+| `methods [...]` | **Methods** — a summary of all method signatures |
+| `Code` attribute | **Opcode** — disassembled JVM bytecode for the method body |
+
+## History
+
+<Note>
+  The original **Java Class Viewer** (published at CodeProject) was renamed and merged into Binary Internals in April 2021. All prior functionality is preserved; the class file parser is now one plugin among many in the unified viewer.
+</Note>

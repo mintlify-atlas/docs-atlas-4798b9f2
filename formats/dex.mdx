@@ -1,0 +1,78 @@
+---
+title: "Android DEX File Format — Binary Internals Parser"
+sidebarTitle: "Android DEX"
+description: "How Binary Internals parses Android Dalvik Executable .dex files: header, string IDs, type IDs, proto IDs, field IDs, method IDs, and class definitions."
+---
+
+DEX (Dalvik Executable) is the binary format used by the Android runtime to package compiled Java and Kotlin code for execution on Android devices. Where a desktop JVM loads individual `.class` files, the Android build toolchain compiles all classes in an application into one or more `.dex` files, merging constant pools and optimizing cross-class references. Binary Internals includes a `DexFile` parser that reads the DEX file section by section, resolving string identifiers into human-readable names and exposing the header, ID tables, and class definition list in an interactive tree.
+
+<Warning>
+  The DEX parser is **still in active development**. The header section, string/type/proto/field/method ID tables, and class definitions are parsed, but deeper structures such as method code items, debug information, and annotation data may be incomplete or not yet exposed in the tree. Expect changes in future releases.
+</Warning>
+
+## File Extension
+
+**`.dex`** — registered by `PluginDescriptorDEX` which returns `["dex"]` from `getExtensions()`.
+
+## What Is a DEX File?
+
+A DEX file is produced by the `d8` (or older `dx`) compiler from Android's build toolchain. It bundles all `.class` files for an application (or a single dex shard) into a single binary that the Android Runtime (ART) or the older Dalvik VM can load directly. The format is described in detail in the [Android DEX format specification](https://source.android.com/devices/tech/dalvik/dex-format.html) and on [Wikipedia — Dalvik (software)](https://en.wikipedia.org/wiki/Dalvik_(software)).
+
+Every valid DEX file begins with an 8-byte magic sequence split across two arrays:
+
+```java
+// From DexFile.java
+static final byte[] DEX_FILE_MAGIC1 = new byte[]{'d', 'e', 'x', '\n'};
+static final byte[] DEX_FILE_MAGIC2 = new byte[]{'0', '3', '5', '\0'};
+```
+
+The four-digit version number embedded in the second magic array (`035` in the example above) increases monotonically with format revisions. The parser verifies both magic arrays at open time, and also reads and validates the endianness tag (`ENDIAN_CONSTANT` or `REVERSE_ENDIAN_CONSTANT`) from the header before any further parsing.
+
+## Parsed Sections
+
+The `DexFile` parser processes the DEX file in the order the sections are referenced by the header:
+
+<Steps>
+  <Step title="Header (header_item)">
+    The `header_item` immediately follows the 8-byte magic. It contains the checksum, SHA-1 signature, total file size, header size, endianness tag, link section offset/size, map offset, and the size and offset of every ID and definition section described below. All offsets in the file are byte offsets from the start of the file.
+  </Step>
+  <Step title="String Identifiers (string_id_item[])">
+    `header.string_ids_size` entries, each a 4-byte offset pointing to a `string_data_item`. The `string_data_item` stores a MUTF-8 encoded string preceded by its character count encoded as an unsigned LEB128. Binary Internals resolves these lazily via `get_string_ids_string(index)`.
+  </Step>
+  <Step title="Type Identifiers (type_id_item[])">
+    `header.type_ids_size` entries, each holding a single `descriptor_idx` field — an index into the string IDs table — giving the type descriptor string (e.g., `Ljava/lang/String;` or `[I`). Resolved via `get_type_ids_string(index)`.
+  </Step>
+  <Step title="Prototype Identifiers (proto_id_item[])">
+    `header.proto_ids_size` entries. Each `proto_id_item` contains a `shorty_idx` (short-form descriptor string index), a `return_type_idx` (type ID index), and a `parameters_off` offset pointing to a `type_list` of parameter types. Parameter type lists are resolved and stored in the `data` map.
+  </Step>
+  <Step title="Field Identifiers (field_id_item[])">
+    `header.field_ids_size` entries. Each `field_id_item` combines a `class_idx` (type ID), a `type_idx` (field type), and a `name_idx` (string ID) to fully describe a field reference.
+  </Step>
+  <Step title="Method Identifiers (method_id_item[])">
+    `header.method_ids_size` entries. Each `method_id_item` contains a `class_idx` (type ID), a `proto_idx` (prototype ID), and a `name_idx` (string ID) to fully describe a method reference.
+  </Step>
+  <Step title="Class Definitions (class_def_item[])">
+    `header.class_defs_size` entries. Each `class_def_item` includes the class type index, access flags, superclass type index, interfaces offset, source file name index, annotations directory offset, class data offset, and static values offset. Offsets for interfaces, annotations, class data, and static values are resolved and stored in the `data` map for further parsing.
+  </Step>
+</Steps>
+
+## Endianness
+
+DEX files carry an explicit endianness tag in the header. The parser reads this tag early in the constructor and creates a `PosDataInputStreamDex` configured for either little-endian (`ENDIAN_CONSTANT = 0x12345678`) or big-endian (`REVERSE_ENDIAN_CONSTANT = 0x78563412`) byte order. All subsequent multi-byte integer reads use this stream.
+
+## Data Section
+
+Beyond the ID tables and class definitions, many DEX items are stored at arbitrary offsets in a general data section. The parser collects all referenced offsets into a `SortedMap<Long, Class<?>> todoData` during the main parse pass and then resolves each one into a `FileComponent` using reflection-based instantiation. The results are stored in `DexFile.data`.
+
+## Constant: NO_INDEX
+
+```java
+// From DexFile.java
+public static final long NO_INDEX = 0xffffffffL;
+```
+
+The value `NO_INDEX` is used in `class_def_item` and `debug_info_item` fields to signal that no index is present (equivalent to a null reference).
+
+<Info>
+  For the full DEX format specification, see the official Android documentation: [Dalvik Executable (DEX) format](https://source.android.com/devices/tech/dalvik/dex-format.html).
+</Info>

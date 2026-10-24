@@ -1,0 +1,79 @@
+---
+title: "Binary File Formats Supported by Binary Internals"
+sidebarTitle: "Overview"
+description: "Explore which file formats Binary Internals can parse, their stability status, and how the file-extension plugin dispatch model routes files to the right parser."
+---
+
+Binary Internals is a Java toolkit that visualizes the internal byte-level structure of binary files. Each supported format is implemented as a self-contained plugin that receives the raw byte array and produces a navigable tree of named, annotated fields. When you open a file — either in the desktop viewer or via the HTTP API — the framework reads the file extension, looks up the matching `PluginDescriptor`, instantiates the corresponding parser class, and passes the file bytes to it. The result is a rich tree you can explore field by field, with hex offsets, lengths, and descriptions drawn directly from the format specification.
+
+## Supported Formats
+
+<CardGroup cols={2}>
+  <Card title="Java .class" icon="java" href="/formats/class">
+    Parses the full JVM ClassFile structure: magic number `0xCAFEBABE`, constant pool, access flags, fields, methods, and attributes. Supports class file versions up to Java 25 (version 69.0). **Status: Stable.**
+  </Card>
+  <Card title="ZIP Archive" icon="file-zipper" href="/formats/zip">
+    Exposes Local File Headers, Central Directory Structures, and the End of Central Directory Record. Also handles `.jar`, `.apk`, `.docx`, and `.xlsx` files which are ZIP-based. **Status: Stable.**
+  </Card>
+  <Card title="BMP Bitmap" icon="image" href="/formats/bmp">
+    Parses the Bitmap File Header, DIB Header variants (BITMAPCOREHEADER through BITMAPV5HEADER), optional Color Table, and Pixel Array. **Status: Stable.**
+  </Card>
+  <Card title="JPEG Image" icon="file-image" href="/formats/jpeg-png">
+    Marker-based parser covering SOI, APP0–APP15, DHT, DQT, SOFnn, SOS, EOI, COM, and restart markers. **Status: Stable.**
+  </Card>
+  <Card title="PNG Image" icon="file-image" href="/formats/jpeg-png">
+    Chunk-based parser covering the 8-byte PNG signature plus IHDR, IDAT, IEND, PLTE, and all standard ancillary chunks. **Status: Stable.**
+  </Card>
+  <Card title="Android DEX" icon="android" href="/formats/dex">
+    Parses the DEX header, string IDs, type IDs, proto IDs, field IDs, method IDs, and class definitions. **Status: In Development.**
+  </Card>
+  <Card title="ELF Binary" icon="terminal" href="/formats/elf">
+    Parses the 16-byte ELF identification block and the 64-bit ELF header (`Elf64_Ehdr`). Only ELF64 is currently implemented. **Status: In Development.**
+  </Card>
+  <Card title="PDF Document" icon="file-pdf" href="#">
+    PDF format support is planned but currently on hold. No parser is available yet.
+  </Card>
+</CardGroup>
+
+## Format Status Summary
+
+| Format | Extension(s) | Parser Class | Status |
+|--------|-------------|--------------|--------|
+| Java Class | `.class` | `ClassFile` | ✅ Stable |
+| ZIP Archive | `.zip` | `ZIPFile` | ✅ Stable |
+| BMP Bitmap | `.bmp` | `BMPFile` | ✅ Stable |
+| JPEG Image | `.jpg`, `.jpeg` | `JPEGFile` | ✅ Stable |
+| PNG Image | `.png` | `PNGFile` | ✅ Stable |
+| Android DEX | `.dex` | `DexFile` | 🚧 In Development |
+| ELF Binary | `.axf`, `.bin`, `.elf`, `.o`, `.prx`, `.puff`, `.so` | `ElfFile` | 🚧 In Development |
+| PDF Document | `.pdf` | — | ⏸ On Hold |
+
+## How Format Dispatch Works
+
+Binary Internals uses a **file-extension plugin model** to route each opened file to the correct parser. Here is the flow from file open to rendered tree:
+
+<Steps>
+  <Step title="File extension extracted">
+    When a file is opened — through the desktop GUI (`File > Open…`), the web interface, or the REST API (`POST /api/v1/parse?name=Foo.class`) — the framework extracts the lowercase file extension from the filename.
+  </Step>
+  <Step title="Plugin lookup">
+    Each format module ships a `PluginDescriptor` implementation that declares which extensions it handles via `getExtensions()`. For example, `PluginDescriptorClass` returns `["class"]` and `PluginDescriptorDEX` returns `["dex"]`. The framework queries all registered descriptors to find a match.
+  </Step>
+  <Step title="Parser instantiated">
+    The matched descriptor's `getFileFormatClass()` method returns the concrete `FileFormat` subclass (e.g., `ClassFile`, `ZIPFile`, `DexFile`). The framework instantiates it, passing either a `Path` or a raw `byte[]`.
+  </Step>
+  <Step title="Tree generated">
+    The parser walks the byte array, creating structured `FileComponent` objects for each field or region. It then calls `generateTreeNode()` to build the Swing `DefaultMutableTreeNode` tree (or the equivalent JSON tree for the web API).
+  </Step>
+  <Step title="Interactive visualization">
+    The user can click any node in the tree to see the byte offset, length, field name, and a human-readable description. For `.class` files, additional tabs display the constant pool, field list, method list, and (for `Code_attribute` nodes) disassembled bytecode.
+  </Step>
+</Steps>
+
+## Standalone Library Usage
+
+Every format module — `FormatCLASS.jar`, `FormatZIP.jar`, `FormatBMP.jar`, `FormatJPEG.jar`, `FormatPNG.jar`, `FormatDEX.jar`, `FormatELF.jar` — can be used independently in your own Java project without pulling in the full viewer application. There are no third-party runtime dependencies beyond the JDK.
+
+<Tip>
+  The `BinaryInternalsWeb` module exposes all format parsers over HTTP. Use `GET /api/v1/formats` to list the currently registered extensions and `POST /api/v1/parse?name=<filename>` to parse any supported file and receive the JSON tree in the response body.
+</Tip>

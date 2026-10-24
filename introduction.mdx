@@ -1,0 +1,62 @@
+---
+title: "Binary Internals: Understand Every Bit of a Binary File"
+sidebarTitle: "Introduction"
+description: "Binary Internals makes every byte of a binary file visible and navigable, delivered as a desktop viewer, a web API server, and embeddable format JARs."
+---
+
+Binary Internals is an open-source Java toolkit that parses binary files and renders every field visually, so you can see exactly what each byte means. Whether you are reverse-engineering a class file, inspecting an image, or auditing a ZIP archive, Binary Internals gives you a structured, navigable view of the raw bytes without requiring any third-party libraries.
+
+## What Binary Internals Provides
+
+The project ships three kinds of deliverables that share the same set of format plug-ins:
+
+- **BinaryInternalsViewer** — a Swing desktop application that lets you open binary files from a menu or by drag-and-drop, then navigate their structure in an interactive tree.
+- **BinaryInternalsWeb** — a self-contained web server that serves the same file view through a browser and exposes an HTTP API for programmatic parsing.
+- **FormatXXXX JARs** — standalone libraries (one per format) that you can embed directly into your own Java project.
+
+## The Plug-in System
+
+Format support is delivered as plug-ins discovered at runtime via the Java `ServiceLoader` mechanism. Each `FormatXXXX` module registers itself, and both the desktop viewer and the web server pick up every plug-in on the module path automatically. Adding a new format does not require changing the viewer or the web server.
+
+<Note>
+  Binary Internals has **no third-party runtime dependencies** beyond the JDK. The format JARs depend only on the shared `CommonLib` module, making them safe to drop into any existing Java project without creating dependency conflicts.
+</Note>
+
+## Supported File Formats
+
+<CardGroup cols={3}>
+  <Card title="Java Class" icon="java">
+    JVM bytecode files produced by any Java compiler (`*.class`)
+  </Card>
+  <Card title="DEX" icon="android">
+    Dalvik Executable files for Android (`*.dex`) — in progress
+  </Card>
+  <Card title="ELF" icon="terminal">
+    Executable and Linkable Format for \*nix systems (`*.elf`) — in progress
+  </Card>
+  <Card title="ZIP" icon="file-zipper">
+    ZIP archives, including JAR and APK (`*.zip`)
+  </Card>
+  <Card title="BMP" icon="image">
+    Windows Bitmap images (`*.bmp`)
+  </Card>
+  <Card title="JPEG" icon="image">
+    JPEG compressed images (`*.jpg`, `*.jpeg`)
+  </Card>
+  <Card title="PNG" icon="image">
+    Portable Network Graphics images (`*.png`)
+  </Card>
+</CardGroup>
+
+## Get Started
+
+Choose the delivery mode that fits your workflow:
+
+<CardGroup cols={2}>
+  <Card title="Desktop Viewer" icon="desktop" href="/quickstart-viewer">
+    Download and run the Swing GUI application to open and explore binary files interactively on your machine.
+  </Card>
+  <Card title="Web Server" icon="server" href="/quickstart-web">
+    Start the web server with Docker or Java and use the HTTP API to parse binary files programmatically.
+  </Card>
+</CardGroup>

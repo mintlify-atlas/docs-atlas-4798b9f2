@@ -1,0 +1,128 @@
+---
+title: "ZIP Archive Format — Binary Internals Parser"
+sidebarTitle: "ZIP"
+description: "How Binary Internals parses ZIP archives: Local File Headers, Central Directory Structures, End of Central Directory Record, and all per-entry metadata fields."
+---
+
+ZIP is one of the most widely used archive formats in the world. Beyond `.zip` files themselves, many common formats are ZIP archives in disguise: Java `.jar` files, Android `.apk` packages, Microsoft Office `.docx` and `.xlsx` documents, and OpenDocument `.odt` files are all valid ZIP archives that Binary Internals can open and parse. The `ZIPFile` parser locates the End of Central Directory Record at the end of the file, uses it to find the Central Directory, and then maps each Central Directory entry back to its Local File Header at the front of the file. All three structures are exposed as annotated, interactive tree nodes.
+
+## File Extension
+
+**`.zip`** — registered by the ZIP plugin. Any file opened with a `.zip` extension will be dispatched to `ZIPFile`.
+
+<Tip>
+  Files with extensions `.jar`, `.apk`, `.docx`, `.xlsx`, `.odt`, and similar formats that use ZIP as their container can also be opened by renaming them to `.zip` or by using the HTTP API with `?name=file.zip`.
+</Tip>
+
+## ZIP File Structure Overview
+
+A standard ZIP file has three main regions, processed in reverse order by the parser:
+
+```text
+[Local File Header 1] [File Data 1] [Data Descriptor 1?]
+[Local File Header 2] [File Data 2] [Data Descriptor 2?]
+...
+[Central Directory Structure 1]
+[Central Directory Structure 2]
+...
+[End of Central Directory Record]
+```
+
+The parser begins at the end of the file, scans backward for the `PK\x05\x06` signature (bytes `0x50 0x4B 0x05 0x06`) to find the End of Central Directory Record, then jumps to the Central Directory offset, and finally seeks to each Local File Header using the `RelativeOffsetOfLocalHeader` stored in the Central Directory.
+
+## End of Central Directory Record
+
+The End of Central Directory Record is always located at or near the end of the file. It provides the information needed to parse everything else:
+
+| Field | Size | Description |
+|-------|------|-------------|
+| Signature | 4 bytes | `PK\x05\x06` = `0x50 0x4B 0x05 0x06` |
+| Disk number | 2 bytes | Disk number of this record |
+| Central dir start disk | 2 bytes | Disk where central directory starts |
+| Entries on this disk | 2 bytes | Number of central directory entries on this disk |
+| Total entries | 2 bytes | Total entries in the central directory (`EntryTotalNumber`) |
+| Central dir size | 4 bytes | Size of the central directory in bytes |
+| Central dir offset | 4 bytes | Offset of central directory from start of first disk (`CentralDirectoryOffset`) |
+| Comment length | 2 bytes | Length of the archive comment |
+| Comment | variable | Archive comment (optional) |
+
+The `EntryTotalNumber` and `CentralDirectoryOffset` fields drive all subsequent parsing. If `EntryTotalNumber` is zero, the file is a valid but empty archive and no further structures are parsed.
+
+## Central Directory Structure
+
+One `CentralDirectoryStructure` entry exists per file in the archive. It contains all the metadata about the entry as well as a pointer back to the Local File Header.
+
+### FileHeader fields
+
+| Field | Size | Description |
+|-------|------|-------------|
+| `Signature` | 4 bytes | `PK\x01\x02` = `0x50 0x4B 0x01 0x02` |
+| `VersionMadeBy` | 2 bytes | Version and OS that created the entry |
+| `VersionNeededToExtract` | 2 bytes | Minimum version needed to extract |
+| `GeneralPurposeBitFlag` | 2 bytes | 16-bit flags (encryption, data descriptor, UTF-8 name, etc.) |
+| `CompressionMethod` | 2 bytes | Compression algorithm (0 = stored, 8 = deflate, etc.) |
+| `LastModFileTime` | 2 bytes | Last modification time in MS-DOS format |
+| `LastModFileDate` | 2 bytes | Last modification date in MS-DOS format |
+| `CRC32` | 4 bytes | CRC-32 checksum of uncompressed data |
+| `CompressedSize` | 4 bytes | Size of the compressed file data |
+| `UncompressedSize` | 4 bytes | Size of the original uncompressed file |
+| `FileNameLength` | 2 bytes | Length of the filename field |
+| `ExtraFieldLength` | 2 bytes | Length of the extra field |
+| `FileCommentLength` | 2 bytes | Length of the per-file comment |
+| `DiskNumberStart` | 2 bytes | Disk number where the file starts |
+| `InternalFileAttributes` | 2 bytes | Internal attributes (e.g., text vs binary flag) |
+| `ExternalFileAttributes` | 4 bytes | External (OS-specific) attributes |
+| `RelativeOffsetOfLocalHeader` | 4 bytes | Byte offset from the start of the first disk to the Local File Header |
+| `FileName` | variable | UTF-8 encoded filename |
+| `ExtraField` | variable | Extension data (e.g., ZIP64, NTFS timestamps) |
+| `FileComment` | variable | Per-file comment (optional) |
+
+## Local File Header
+
+Each file's data is preceded by a `LocalFileHeader` immediately before the compressed bytes. The layout is similar to the Central Directory entry but without the `VersionMadeBy`, `DiskNumberStart`, per-file comment, and internal/external attributes fields.
+
+| Field | Size | Description |
+|-------|------|-------------|
+| `Signature` | 4 bytes | `PK\x03\x04` = `0x50 0x4B 0x03 0x04` |
+| `VersionNeededToExtract` | 2 bytes | Minimum version needed to extract |
+| `GeneralPurposeBitFlag` | 2 bytes | 16-bit flags |
+| `CompressionMethod` | 2 bytes | Compression algorithm |
+| `LastModFileTime` | 2 bytes | MS-DOS time |
+| `LastModFileDate` | 2 bytes | MS-DOS date |
+| `CRC32` | 4 bytes | CRC-32 checksum |
+| `CompressedSize` | 4 bytes | Compressed size |
+| `UncompressedSize` | 4 bytes | Uncompressed size |
+| `FileNameLength` | 2 bytes | Filename length |
+| `ExtraFieldLength` | 2 bytes | Extra field length |
+| `FileName` | variable | UTF-8 filename |
+| `ExtraField` | variable | Extension data |
+
+The `LocalFileHeader` total length is `30 + FileNameLength + ExtraFieldLength` bytes, followed immediately by `CompressedSize` bytes of compressed file data.
+
+## General Purpose Bit Flag
+
+The 16-bit `GeneralPurposeBitFlag` is expanded in the tree into individual bit nodes. Both the `LocalFileHeader` and `CentralDirectoryStructure.FileHeader` expose this flag. Some notable bits:
+
+| Bit | Meaning |
+|-----|---------|
+| 0 | File is encrypted |
+| 3 | Data descriptor follows the compressed data (sizes/CRC are zero in the local header) |
+| 6 | Strong encryption |
+| 11 | Filename and comment are encoded in UTF-8 |
+
+## Known Signatures
+
+```java
+// From ZIPFile.java
+LOCAL_FILE_HEADER      = { 0x50, 0x4B, 0x03, 0x04 }  // PK♥♦
+CENTRAL_FILE_HEADER    = { 0x50, 0x4B, 0x01, 0x02 }  // PK☺☻
+CENTRAL_END            = { 0x50, 0x4B, 0x05, 0x06 }  // PK♣♠ (EOCD)
+DIGITAL_SIG_HEADER     = { 0x50, 0x4B, 0x05, 0x05 }
+CENTRAL_ZIP64_RECORD   = { 0x50, 0x4B, 0x06, 0x06 }
+CENTRAL_ZIP64_LOCATOR  = { 0x50, 0x4B, 0x06, 0x07 }
+ARCHIVE_EXTRA_DATA     = { 0x50, 0x4B, 0x06, 0x08 }
+```
+
+<Note>
+  The minimum valid ZIP file length is 22 bytes (the bare minimum for an empty archive containing only the End of Central Directory Record). Files shorter than 22 bytes are rejected with a `FileFormatException`.
+</Note>

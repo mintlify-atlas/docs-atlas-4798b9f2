@@ -1,0 +1,82 @@
+{
+  "projectType": "general",
+  "projectName": "Binary Internals",
+  "projectDescription": "A Java toolkit for visualizing and parsing binary file formats — including .class, .dex, .elf, .zip, .bmp, .jpeg, and .png — through a desktop GUI viewer, a web interface, and an HTTP API.",
+  "theme": "aspen",
+  "primaryColor": "#2563EB",
+  "lightColor": "#DBEAFE",
+  "darkColor": "#1E3A8A",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart-viewer",
+              "quickstart-web",
+              "building-from-source"
+            ]
+          },
+          {
+            "group": "Supported Formats",
+            "pages": [
+              "formats/overview",
+              "formats/class",
+              "formats/dex",
+              "formats/elf",
+              "formats/zip",
+              "formats/bmp",
+              "formats/jpeg-png"
+            ]
+          },
+          {
+            "group": "Web Server & API",
+            "pages": [
+              "web/overview",
+              "web/configuration",
+              "web/api-reference"
+            ]
+          },
+          {
+            "group": "Developer Guide",
+            "pages": [
+              "developer/architecture",
+              "developer/plugin-system",
+              "developer/standalone-libs"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Desktop Swing GUI viewer for interactive binary file inspection",
+    "Web server with HTTP API for programmatic file parsing",
+    "Plugin-based architecture — each file format is a separate module",
+    "Zero third-party runtime dependencies (JDK only)",
+    "Supports .class (Java), .dex (Android), .elf (*nix), .zip, .bmp, .jpeg, .png",
+    "Tree-node output per file — each node maps to byte range, start offset, and length",
+    "Docker support for the web server module",
+    "Drag-and-drop file opening in the GUI",
+    "Standalone format JARs usable in other Java projects"
+  ],
+  "publicApiSurface": [
+    "GET /api/v1/formats — list supported formats and file extensions",
+    "POST /api/v1/parse?name=Foo.class — parse file bytes, return JSON tree",
+    "GET /health — health check endpoint",
+    "GET /icons/{Name}.png — tree node icon images",
+    "FileFormat (abstract class) — base class for all format parsers",
+    "PluginDescriptor (interface) — plug-in contract: getExtensions(), getFileFormatClass()",
+    "PosDataInputStream — positional data input stream for binary parsing",
+    "JTreeNodeFileComponent — tree node value carrying start/length/icon/description",
+    "ClassFile extends FileFormat — Java .class file parser",
+    "ZIPFile extends FileFormat — ZIP archive parser",
+    "BMPFile extends FileFormat — BMP image parser",
+    "DexFile extends FileFormat — Android DEX file parser",
+    "ElfFile extends FileFormat — ELF binary parser",
+    "ParseService — server-side service: parse(bytes, fileName), formatsJson(), findPlugin(fileName)"
+  ]
+}

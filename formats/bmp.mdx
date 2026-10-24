@@ -1,0 +1,100 @@
+---
+title: "BMP Bitmap Format — Binary Internals Parser"
+sidebarTitle: "BMP"
+description: "How Binary Internals parses BMP bitmap files: Bitmap File Header, DIB Header variants from BITMAPCOREHEADER to BITMAPV5HEADER, Color Table, and Pixel Array."
+---
+
+The BMP (Bitmap) format is one of the simplest raster image formats in common use. Defined by Microsoft, it stores uncompressed or lightly compressed pixel data along with a fixed-size file header and a variable-size device-independent bitmap (DIB) header. Binary Internals was among the first formats supported in the toolkit, and the `BMPFile` parser exposes all four logical regions of a BMP file — the Bitmap File Header, the DIB Header, the optional Color Table, and the Pixel Array — as annotated tree nodes with byte offsets and field descriptions.
+
+## File Extension
+
+**`.bmp`** — the parser is invoked for any file with the `.bmp` extension.
+
+## BMP File Structure
+
+```text
+[Bitmap File Header  — 14 bytes]
+[DIB Header          — variable: 12, 40, 52, 56, 64, 108, or 124 bytes]
+[Color Table         — optional, present when bits-per-pixel ≤ 8]
+[GAP (optional padding between color table and pixel array)]
+[Pixel Array         — raw pixel data, offset given in file header]
+```
+
+## Bitmap File Header (14 bytes)
+
+The `BitmapFileHeader` is always 14 bytes (`BitmapFileHeader.LENGTH = 14`) and is the entry point for identifying and validating a BMP file.
+
+| Field | Offset | Size | Description |
+|-------|--------|------|-------------|
+| `magic` | 0 | 2 bytes | ASCII signature. `"BM"` for Windows BMP. Other values: `"BA"` (OS/2 Bitmap Array), `"CI"` (OS/2 Color Icon), `"CP"` (OS/2 Color Pointer), `"IC"` (OS/2 Icon), `"PT"` (OS/2 Pointer) |
+| `fileSize` | 2 | 4 bytes | Total size of the BMP file in bytes |
+| `creator1` | 6 | 2 bytes | Reserved; value depends on the creating application |
+| `creator2` | 8 | 2 bytes | Reserved; value depends on the creating application |
+| `offset` | 10 | 4 bytes | Byte offset from the start of the file to the beginning of the Pixel Array |
+
+The `magic` field is read as a 2-character ASCII string. The most common value is `"BM"`, which covers all modern Windows BMP files. The `offset` field is used to position the `PixelArray` in the tree and to decide whether a Color Table is present (if the stream position after the DIB header is less than `offset`, a Color Table exists in the gap).
+
+## DIB Header
+
+The DIB Header immediately follows the Bitmap File Header. Its size determines which variant is in use. The `DIBHeader` class dispatches to the appropriate inner class based on the `size` field (the first 4 bytes of the header):
+
+| Size (bytes) | Class | Description |
+|-------------|-------|-------------|
+| 12 | `BITMAPCOREHEADER` | Oldest Windows / OS/2 format |
+| 40 | `BITMAPINFOHEADER` | Standard Windows DIB (most common) |
+| 52 | `BITMAPV2INFOHEADER` | Adobe extension of BITMAPINFOHEADER |
+| 56 | `BITMAPV3INFOHEADER` | Adobe extension of BITMAPINFOHEADER |
+| 64 | `BITMAPCOREHEADER2` | OS/2 2.x extended format |
+| 108 | `BITMAPV4HEADER` | Windows 95 / NT 4.0 with color profiles |
+| 124 | `BITMAPV5HEADER` | Windows 98 / 2000 with ICC profiles |
+
+### BITMAPCOREHEADER (12 bytes)
+
+The original Windows 3.x format. Fields: `size` (4 bytes), `Width` (2 bytes), `Height` (2 bytes), `Planes` (2 bytes), `BitCount` (2 bytes).
+
+### BITMAPINFOHEADER (40 bytes)
+
+The most widely used DIB header variant. Fields:
+
+| Field | Size | Description |
+|-------|------|-------------|
+| `size` | 4 bytes | Header size (40) |
+| `Width` | 4 bytes | Bitmap width in pixels (signed integer) |
+| `Height` | 4 bytes | Bitmap height in pixels (signed; negative = top-down) |
+| `Planes` | 2 bytes | Number of color planes; must be 1 |
+| `BitCount` | 2 bytes | Bits per pixel (1, 4, 8, 16, 24, or 32) |
+| `Compression` | 4 bytes | Compression method (see table below) |
+| `SizeImage` | 4 bytes | Size of the raw pixel data in bytes |
+| `XPelsPerMeter` | 4 bytes | Horizontal pixels per meter (device resolution) |
+| `YPelsPerMeter` | 4 bytes | Vertical pixels per meter (device resolution) |
+| `ColorsUsed` | 4 bytes | Number of colors in the color table (0 = use maximum) |
+| `ColorsImportant` | 4 bytes | Important color count (0 = all important) |
+
+### Compression Methods
+
+The `Compression` field in `BITMAPINFOHEADER` maps to the `CompressionMethod` enum:
+
+| Value | Constant | Description |
+|-------|----------|-------------|
+| 0 | `BI_RGB` | No compression (most common) |
+| 1 | `BI_RLE8` | Run-length encoding for 8 bpp |
+| 2 | `BI_RLE4` | Run-length encoding for 4 bpp |
+| 3 | `BI_BITFIELDS` | Bit-field masks / Huffman 1D (BITMAPCOREHEADER2) |
+| 4 | `BI_JPEG` | JPEG-compressed bitmap |
+| 5 | `BI_PNG` | PNG-compressed bitmap |
+
+### BITMAPV4HEADER (108 bytes) and BITMAPV5HEADER (124 bytes)
+
+These extended variants add ICC color profile support. `BITMAPV4HEADER` adds `RedMask`, `GreenMask`, `BlueMask`, `AlphaMask`, `ColorSpaceType`, `Endpoints` (a `CIEXYZTRIPLE` with RGB CIE XYZ coordinates), and `GammaRed`, `GammaGreen`, `GammaBlue` fields. `BITMAPV5HEADER` extends this further with `Intent`, `ICCProfileData` (byte offset to the ICC profile), `ICCProfileSize`, and a `Reserved` field.
+
+## Color Table
+
+The `ColorTable` is present when the stream position after the DIB header is less than the pixel array offset from `BitmapFileHeader.offset`. This corresponds to images with `BitCount` ≤ 8 (1, 4, or 8 bpp), where each pixel value is an index into the color table rather than a direct color.
+
+## Pixel Array
+
+The `PixelArray` starts at the byte offset specified by `BitmapFileHeader.offset`. It contains the raw pixel data. For uncompressed bitmaps, rows are stored bottom-to-top by default (positive `Height`), and each row is padded to a 4-byte boundary.
+
+<Note>
+  If there is any gap between the end of the Color Table and the start of the Pixel Array, Binary Internals labels it as a `GAP1` node in the tree with its byte range. This occurs occasionally in files written by applications that insert extra padding.
+</Note>

@@ -1,0 +1,213 @@
+---
+title: "Use Binary Internals Format JARs as Standalone Libraries"
+sidebarTitle: "Standalone Libraries"
+description: "Embed individual Binary Internals format parser JARs — FormatCLASS, FormatZIP, and more — into your own Java project without the GUI or web server."
+---
+
+The format parser modules (`FormatBMP`, `FormatCLASS`, `FormatJPEG`, `FormatPNG`, `FormatZIP`, and the in-development `FormatDEX` and `FormatELF`) are ordinary Java modules with no GUI or HTTP server code in them. They depend only on `CommonLib` and the JDK, so you can drop one or more of them into your own project to parse binary files programmatically, walk the resulting component tree, and extract structured data — all without starting a Swing application or a web server.
+
+## Available Format JARs
+
+<CardGroup cols={2}>
+  <Card title="FormatBMP" icon="image">
+    Parser for the BMP (Device Independent Bitmap) image format. Parses the file header, DIB header, color table, and pixel array.
+  </Card>
+  <Card title="FormatCLASS" icon="code">
+    Parser for Java `.class` files. Decodes the constant pool, fields, methods, and all standard JVM attributes.
+  </Card>
+  <Card title="FormatJPEG" icon="image">
+    Parser for JPEG image files. Walks the JPEG segment markers and their payloads.
+  </Card>
+  <Card title="FormatPNG" icon="image">
+    Parser for PNG image files. Decodes the PNG signature and all chunk types.
+  </Card>
+  <Card title="FormatZIP" icon="file-zipper">
+    Parser for ZIP archive files. Decodes local file entries, the central directory, and the end-of-central-directory record.
+  </Card>
+  <Card title="FormatDEX" icon="mobile">
+    **In development.** Parser for Android Dalvik Executable (DEX) files. API may change between releases.
+  </Card>
+  <Card title="FormatELF" icon="terminal">
+    **In development.** Parser for ELF (Executable and Linkable Format) binaries used on Linux and other Unix-like systems. API may change between releases.
+  </Card>
+</CardGroup>
+
+<Note>
+All format JARs depend only on `CommonLib` and the JDK — no third-party runtime libraries are required. Adding a single format JAR to your project brings in exactly two JARs: the format module itself and `CommonLib`.
+</Note>
+
+<Warning>
+`FormatDEX` and `FormatELF` are still in active development. Their public APIs — class names, field names, and method signatures — may change between releases without notice. Use them in production code only if you are prepared to update call sites when a new version ships.
+</Warning>
+
+## Adding a Format JAR to Your Project
+
+The format JARs are not yet published to Maven Central. You must build them locally first:
+
+```bash
+# Clone the repository and build everything
+git clone https://github.com/amosshi/binaryinternals.git
+cd binaryinternals
+mvn install
+```
+
+After `mvn install`, the JARs are available in your local Maven repository (`~/.m2/repository/org/binaryinternals/`). Reference them in your own project's `pom.xml`:
+
+<CodeGroup>
+```xml Maven (FormatCLASS)
+<dependency>
+    <groupId>org.binaryinternals</groupId>
+    <artifactId>FormatCLASS</artifactId>
+    <version>3.7</version>
+</dependency>
+```
+
+```xml Maven (FormatZIP)
+<dependency>
+    <groupId>org.binaryinternals</groupId>
+    <artifactId>FormatZIP</artifactId>
+    <version>3.7</version>
+</dependency>
+```
+
+```xml Maven (FormatBMP)
+<dependency>
+    <groupId>org.binaryinternals</groupId>
+    <artifactId>FormatBMP</artifactId>
+    <version>3.7</version>
+</dependency>
+```
+</CodeGroup>
+
+Each format module transitively depends on `CommonLib`, so you do not need to list `CommonLib` separately.
+
+## Parsing a File Programmatically
+
+### Using a Format Class Directly
+
+Instantiate the format class with a `java.nio.file.Path`, then call `generateTreeNode` to build the component tree. The tree consists of `DefaultMutableTreeNode` objects whose `getUserObject()` returns a `JTreeNodeFileComponent`.
+
+```java
+import org.binaryinternals.format.classfile.ClassFile;
+import org.binaryinternals.commonlib.JTreeNodeFileComponent;
+import javax.swing.tree.DefaultMutableTreeNode;
+import java.nio.file.Path;
+
+ClassFile cf = new ClassFile(Path.of("MyClass.class"));
+DefaultMutableTreeNode root = new DefaultMutableTreeNode(
+    new JTreeNodeFileComponent(0, cf.fileByteArray.length, "MyClass.class"));
+cf.generateTreeNode(root);
+// Walk the tree to read node details
+```
+
+Walk the tree recursively to inspect every parsed component:
+
+```java
+import javax.swing.tree.TreeNode;
+import java.util.Enumeration;
+
+static void walk(DefaultMutableTreeNode node, int indent) {
+    if (node.getUserObject() instanceof JTreeNodeFileComponent comp) {
+        System.out.printf("%s[%d, +%d] %s%n",
+            "  ".repeat(indent),
+            comp.getStartPos(),
+            comp.getLength(),
+            comp.getText());
+    }
+    Enumeration<TreeNode> children = node.children();
+    while (children.hasMoreElements()) {
+        walk((DefaultMutableTreeNode) children.nextElement(), indent + 1);
+    }
+}
+
+walk(root, 0);
+```
+
+Each `JTreeNodeFileComponent` exposes:
+
+| Method | Returns | Description |
+|---|---|---|
+| `getStartPos()` | `int` | Byte offset in the file where this component starts |
+| `getLength()` | `int` | Number of bytes this component covers |
+| `getText()` | `String` | Human-readable label (e.g. `"magic = 0xCAFEBABE"`) |
+| `getDescription()` | `String` | Optional HTML description string, may be `null` |
+| `getIcon()` | `Icon` | Optional Swing icon, may be `null` |
+| `getLastPosPlus1()` | `int` | `startPos + length` — the byte offset of the next component |
+
+### Getting JSON Output Without the HTTP Layer
+
+If you want JSON output but do not want to run the embedded web server, use `ParseService` from the `BinaryInternalsWeb` module directly. `ParseService` uses `ServiceLoader` to find all format plugins on the module path, then parses the given bytes and serializes the tree to JSON.
+
+First add `BinaryInternalsWeb` to your dependencies:
+
+```xml
+<dependency>
+    <groupId>org.binaryinternals</groupId>
+    <artifactId>BinaryInternalsWeb</artifactId>
+    <version>3.7</version>
+</dependency>
+```
+
+Then call `ParseService.parse()`:
+
+```java
+import org.binaryinternals.web.ParseService;
+import java.nio.file.Path;
+
+ParseService service = new ParseService(Path.of("/tmp"));
+String json = service.parse(fileBytes, "MyClass.class");
+System.out.println(json);
+```
+
+`ParseService` selects the correct parser by the file extension in the `fileName` argument, writes a temporary copy of `fileBytes` to the `tempDir` you provide, parses it, and immediately deletes the temporary file. The returned JSON has the shape:
+
+```json
+{
+  "text": "MyClass.class",
+  "start": 0,
+  "length": 1234,
+  "children": [
+    {
+      "text": "magic: CAFEBABE",
+      "start": 0,
+      "length": 4,
+      "icon": "Magic",
+      "description": "<p>The class file magic number.</p>"
+    }
+  ]
+}
+```
+
+Fields `icon`, `description`, and `children` are omitted from nodes where they are absent.
+
+You can also inspect the list of loaded plugins before parsing:
+
+```java
+service.getPlugins().forEach(p ->
+    System.out.println(p.getExtensionDescription() + " -> " + p.getExtensions()));
+```
+
+Or get the full formats list as a JSON string:
+
+```java
+String formatsJson = service.formatsJson();
+// [{"description":"Bitmap Images (*.bmp)","extensions":["bmp"]}, ...]
+```
+
+## Module Path Configuration
+
+If your project uses the Java Platform Module System, add the `provides` usage declaration to your own `module-info.java` so the `ServiceLoader` wiring is explicit:
+
+```java
+module com.example.myapp {
+    requires org.binaryinternals.formatclass;
+    requires org.binaryinternals.commonlib;
+}
+```
+
+When running from the command line, place all JARs on the module path (not the classpath) so that the `provides` / `uses` wiring in `module-info.java` is honoured:
+
+```bash
+java --module-path libs \
+     --module com.example.myapp/com.example.myapp.Main
+```

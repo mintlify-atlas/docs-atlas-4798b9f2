@@ -1,0 +1,86 @@
+---
+title: "Get Started with the Binary Internals Desktop Viewer"
+sidebarTitle: "Desktop Viewer"
+description: "Download the self-contained Swing GUI JAR, launch it with a single java -jar command, and explore the full internal structure of any supported binary file."
+---
+
+The Binary Internals Desktop Viewer is a self-contained Swing application that parses binary files and presents their structure as an interactive tree. This page walks you through downloading the JAR from GitHub Releases, launching it, opening your first file, and navigating the three-panel layout.
+
+<Steps>
+
+  ### Install Java 11 or Later
+
+  The viewer requires a Java runtime of version 11 or higher. Verify your installation by running:
+
+  ```bash
+  java -version
+  ```
+
+  The output should report `version "11"` or higher. If Java is not installed, download OpenJDK from [adoptium.net](https://adoptium.net) or your operating system's package manager.
+
+  ### Download the JAR
+
+  Go to the [Binary Internals Releases page](https://github.com/amosshi/binaryinternals/releases) and download the latest `BinaryInternalsViewer-3.7-timestamp.jar` file.
+
+  <Note>
+    The `timestamp` portion of the filename is an auto-generated build timestamp embedded at compile time, for example `BinaryInternalsViewer-3.7-20261017000000.jar`. The exact value varies per release; use whatever file you downloaded.
+  </Note>
+
+  ### Launch the Viewer
+
+  Open a terminal, navigate to the folder containing the downloaded JAR, and run:
+
+  ```bash
+  java -jar BinaryInternalsViewer-3.7-timestamp.jar
+  ```
+
+  The Binary Internals Viewer window opens, sized to 80 % of your screen with an empty canvas ready to accept a file.
+
+  **Optional: open a file directly from the command line**
+
+  Pass a file path as the first argument to skip the open dialog:
+
+  ```bash
+  java -jar BinaryInternalsViewer-3.7-timestamp.jar MyFile.class
+  ```
+
+  The viewer starts and immediately begins parsing `MyFile.class`.
+
+  ### Open a File
+
+  There are two ways to load a file after the viewer is running:
+
+  - **Menu:** Choose **File → Open…**, browse to the binary file you want to inspect, and click Open.
+  - **Drag and drop:** Drag any supported binary file from your file manager and drop it anywhere onto the viewer window, including onto the menu bar.
+
+  <Tip>
+    Drag-and-drop works on both the main canvas and the menu bar. If you drop multiple files at once, the viewer opens the first file in the list.
+  </Tip>
+
+  ### Navigate the Tree View
+
+  Once a file is open, the viewer shows a **split-panel layout**:
+
+  - **Left panel — tree view:** Every field, section, and sub-structure of the file appears as a collapsible node. Click a node to select it.
+  - **Right panel — hex and detail view:** Selecting a node highlights the corresponding bytes in the hex display and shows a human-readable description of the selected field.
+
+  Expand nodes by clicking the triangle or arrow next to them. The tree reflects the exact on-disk layout, so the byte offsets shown in the detail view match the raw file.
+
+</Steps>
+
+## Recent Files
+
+The **File → Recent Files** submenu keeps track of the last **10** files you opened in the current session. Click any entry to reopen that file without navigating the file chooser again.
+
+## Menu Reference
+
+| Menu item | Shortcut | Description |
+|---|---|---|
+| File → Open… | Ctrl/Cmd + O | Open the file chooser dialog |
+| File → Close | — | Close the current file |
+| File → Recent Files | — | Reopen one of the last 10 files |
+| File → Exit | Ctrl/Cmd + E | Quit the application |
+| Help → Homepage | — | Open the project page in your browser |
+| Help → Plug-ins | — | List the loaded format plug-ins |
+| Help → Icons | — | Show the icon legend used in the tree |
+| Help → About | — | Display version information |

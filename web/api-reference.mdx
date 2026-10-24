@@ -1,0 +1,232 @@
+---
+title: "Binary Internals HTTP API Reference"
+sidebarTitle: "API Reference"
+description: "Complete reference for all Binary Internals HTTP API endpoints, including request parameters, JSON response shapes, and error status codes."
+---
+
+The Binary Internals HTTP API is served from the same port as the web UI (default `http://localhost:8080`). All API endpoints live under `/api/v1/` and return `application/json; charset=utf-8`. Non-API endpoints (`/health`, `/icons/`) return their own content types. There are no authentication headers — use a reverse proxy or network policy to restrict access in production. See [Configuration](/web/configuration) for all tuning knobs.
+
+---
+
+## GET /api/v1/formats
+
+Returns a JSON array listing every format plug-in that is loaded and available for parsing.
+
+**Request**
+
+No request body or query parameters.
+
+```bash
+curl http://localhost:8080/api/v1/formats
+```
+
+**Response — 200 OK**
+
+A JSON array. Each element describes one plug-in.
+
+<ResponseField name="description" type="string" required>
+  Human-readable label for the format, e.g. `"Java Class file"`.
+</ResponseField>
+
+<ResponseField name="extensions" type="array of strings" required>
+  File extensions handled by this plug-in, lowercase, without the leading dot — e.g. `["class"]`.
+</ResponseField>
+
+```json
+[
+  {"description": "BMP file", "extensions": ["bmp"]},
+  {"description": "Java Class file", "extensions": ["class"]},
+  {"description": "JPEG file", "extensions": ["jpg", "jpeg"]},
+  {"description": "PNG file", "extensions": ["png"]},
+  {"description": "ZIP file", "extensions": ["zip"]}
+]
+```
+
+---
+
+## POST /api/v1/parse
+
+Parses a binary file and returns its internal structure as a recursive JSON node tree — the same tree displayed in the desktop viewer.
+
+**Request**
+
+<ParamField query="name" type="string" required>
+  The filename, including extension, e.g. `Foo.class`. The extension determines which format plug-in is used. The name must have a valid extension (1–16 alphanumeric characters after the last dot).
+</ParamField>
+
+Send the raw file bytes as the request body. Set `Content-Length` to the byte count of the file, or use chunked transfer encoding.
+
+```bash
+curl --compressed \
+     --data-binary @Foo.class \
+     "http://localhost:8080/api/v1/parse?name=Foo.class"
+```
+
+<Tip>
+Pass `--compressed` to let curl negotiate gzip, which can reduce response size by 70–90 % for typical parse trees.
+</Tip>
+
+**Response — 200 OK**
+
+A single JSON object representing the root node of the file's parse tree. Nodes are nested recursively through the `children` field.
+
+<ResponseField name="text" type="string" required>
+  Human-readable label for this node, e.g. `"magic: CAFEBABE"` or `"constant_pool[1]"`.
+</ResponseField>
+
+<ResponseField name="start" type="number" required>
+  Byte offset of this node's data within the file (zero-indexed).
+</ResponseField>
+
+<ResponseField name="length" type="number" required>
+  Number of bytes this node spans in the file.
+</ResponseField>
+
+<ResponseField name="icon" type="string">
+  Name of the icon to display for this node, corresponding to a value in the `Icons` enum. Omitted when the node has no icon. Fetch the image from [`GET /icons/{Name}.png`](#get-icons-name-png).
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  HTML fragment that explains the meaning of this node's value. Omitted when the node has no description. Rendered as HTML in the web UI; sanitise before displaying in your own interface.
+</ResponseField>
+
+<ResponseField name="children" type="array">
+  Child nodes, each with the same shape (recursive). Omitted when the node is a leaf.
+
+  <Expandable title="Child node fields">
+    <ResponseField name="text" type="string" required>Label for the child node.</ResponseField>
+    <ResponseField name="start" type="number" required>Byte offset of the child node.</ResponseField>
+    <ResponseField name="length" type="number" required>Byte length of the child node.</ResponseField>
+    <ResponseField name="icon" type="string">Icon name, if any.</ResponseField>
+    <ResponseField name="description" type="string">HTML description, if any.</ResponseField>
+    <ResponseField name="children" type="array">Grandchild nodes, and so on.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Sample response (abbreviated)**
+
+```json
+{
+  "text": "Foo.class",
+  "start": 0,
+  "length": 512,
+  "icon": "Jar",
+  "children": [
+    {
+      "text": "magic: CAFEBABE",
+      "start": 0,
+      "length": 4,
+      "icon": "Magic",
+      "description": "<p>Magic number identifying a Java class file.</p>"
+    },
+    {
+      "text": "minor_version: 0",
+      "start": 4,
+      "length": 2
+    },
+    {
+      "text": "major_version: 65",
+      "start": 6,
+      "length": 2,
+      "description": "<p>Java 21</p>"
+    },
+    {
+      "text": "constant_pool_count: 42",
+      "start": 8,
+      "length": 2
+    }
+  ]
+}
+```
+
+---
+
+## GET /health
+
+A lightweight liveness check suitable for container health probes and load balancer checks.
+
+**Request**
+
+No parameters.
+
+```bash
+curl http://localhost:8080/health
+```
+
+**Response — 200 OK**
+
+```json
+{"status":"UP"}
+```
+
+Use this endpoint as a Docker `HEALTHCHECK` or Kubernetes liveness probe. It returns immediately without touching the parser or any plug-ins.
+
+---
+
+## GET /icons/{Name}.png
+
+Returns a PNG image for a named icon. Icon names correspond to values in the `Icons` enum used by the format plug-ins (e.g. `Magic`, `Jar`, `Annotations`).
+
+**Request**
+
+<ParamField path="Name" type="string" required>
+  The icon enum name, case-sensitive, e.g. `Magic`. Append `.png` to form the path: `/icons/Magic.png`.
+</ParamField>
+
+```bash
+curl -o magic.png http://localhost:8080/icons/Magic.png
+```
+
+**Response — 200 OK**
+
+PNG image data (`image/png`). The response includes:
+
+```
+Cache-Control: public, max-age=86400
+```
+
+Icons are rendered from the Swing `Icon` objects once and cached in memory for the lifetime of the process, so repeated requests are fast. If the name does not match any `Icons` enum value, the server returns `404`.
+
+---
+
+## CORS
+
+All `/api/` endpoints support CORS preflight (`OPTIONS`) requests. When `CORS_ORIGIN` is set (the default is `*`), the following headers are added to every API response:
+
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type
+```
+
+Preflight `OPTIONS` requests receive `204 No Content`. Set `CORS_ORIGIN=` (empty) to disable CORS headers entirely. See [Configuration](/web/configuration) for details.
+
+---
+
+## Error responses
+
+All errors are returned as JSON with a matching HTTP status code.
+
+```json
+{"status": 415, "error": "Unsupported file type: Foo.xyz"}
+```
+
+<ResponseField name="status" type="number" required>
+  The HTTP status code, mirrored in the JSON body for clients that cannot easily read the HTTP status line.
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  A human-readable description of what went wrong.
+</ResponseField>
+
+### HTTP status codes
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Missing or blank `name` query parameter, empty request body, or an invalid `Content-Length` header value |
+| `405` | Wrong HTTP method for the endpoint (e.g. `GET` on `/api/v1/parse`) |
+| `413` | File exceeds the configured `MAX_UPLOAD_MB` limit |
+| `415` | No plug-in supports the file extension in the `name` parameter |
+| `422` | File content is invalid or corrupt and could not be parsed; also returned for files that are too complex (out of memory or stack overflow during parsing) |
+| `503` | Server is busy — all `MAX_CONCURRENT_PARSES` slots are occupied; retry after a short delay |
+| `504` | Parse did not complete within `PARSE_TIMEOUT_SECONDS`; the operation was cancelled |
