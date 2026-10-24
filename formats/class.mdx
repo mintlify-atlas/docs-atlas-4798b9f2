@@ -70,7 +70,7 @@ ClassFile {
     `fields_count` (u2) is followed by `fields_count` `field_info` structures. Each `field_info` contains its own `access_flags`, `name_index`, `descriptor_index`, `attributes_count`, and `attributes` array.
   </Step>
   <Step title="Methods">
-    `methods_count` (u2) is followed by `methods_count` `method_info` structures with the same layout as fields. When you click a `Code_attribute` node in the tree, an additional **Opcode** tab appears showing disassembled JVM bytecode.
+    `methods_count` (u2) is followed by `methods_count` `method_info` structures with the same layout as fields. When you click a `code: byte codes` node in the tree (the `Code` attribute of a method), an additional **Opcode** tab appears showing disassembled JVM bytecode.
   </Step>
   <Step title="Attributes">
     `attributes_count` (u2) is followed by `attributes_count` `attribute_info` structures at the class level. The parser dispatches each attribute by its name string (resolved from `attribute_name_index` in the constant pool). Class-level attributes include `SourceFile`, `InnerClasses`, `BootstrapMethods`, `Module`, `NestHost`, `NestMembers`, `Record`, `PermittedSubclasses`, and others defined in the JVM specification.
@@ -79,7 +79,7 @@ ClassFile {
 
 ## JVM Version Reference
 
-The `getVersionText()` method produces a string in the format `<major>.<minor> (<Java SE release>)`. A selection of major version values:
+The `getVersionText()` method produces a string in the format `<major>.<minor> (<Java SE release>)`. All major version values from JDK 1.0.2 through Java 25:
 
 | Major Version | Java SE Release |
 |---------------|----------------|
@@ -91,9 +91,22 @@ The `getVersionText()` method produces a string in the format `<major>.<minor> (
 | 50 | 6 |
 | 51 | 7 |
 | 52 | 8 |
+| 53 | 9 |
+| 54 | 10 |
 | 55 | 11 |
+| 56 | 12 |
+| 57 | 13 |
+| 58 | 14 |
+| 59 | 15 |
+| 60 | 16 |
 | 61 | 17 |
+| 62 | 18 |
+| 63 | 19 |
+| 64 | 20 |
 | 65 | 21 |
+| 66 | 22 |
+| 67 | 23 |
+| 68 | 24 |
 | 69 | 25 |
 
 <Info>
@@ -119,10 +132,10 @@ When a node is selected in the Binary Internals viewer, additional tabs may appe
 
 | Clicked Node Prefix | Extra Tab |
 |---------------------|-----------|
-| `constant_pool [...]` | **Constant Pool** — a full text report of all CP entries |
-| `fields [...]` | **Fields** — a summary of all field names and descriptors |
-| `methods [...]` | **Methods** — a summary of all method signatures |
-| `Code` attribute | **Opcode** — disassembled JVM bytecode for the method body |
+| `constant_pool[` | **Constant Pool** — a full text report of all CP entries |
+| `fields[` | **Fields** — a summary of all field names and descriptors |
+| `methods[` | **Methods** — a summary of all method signatures |
+| `code: byte codes` | **Opcode** — disassembled JVM bytecode for the method body |
 
 ## History
 

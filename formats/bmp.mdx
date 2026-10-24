@@ -1,7 +1,7 @@
 ---
 title: "BMP Bitmap Format — Binary Internals Parser"
 sidebarTitle: "BMP"
-description: "How Binary Internals parses BMP bitmap files: Bitmap File Header, DIB Header variants from BITMAPCOREHEADER to BITMAPV5HEADER, Color Table, and Pixel Array."
+description: "How Binary Internals parses BMP files: Bitmap File Header, DIB Header variants BITMAPCOREHEADER to BITMAPV5HEADER, optional Color Table, and Pixel Array."
 ---
 
 The BMP (Bitmap) format is one of the simplest raster image formats in common use. Defined by Microsoft, it stores uncompressed or lightly compressed pixel data along with a fixed-size file header and a variable-size device-independent bitmap (DIB) header. Binary Internals was among the first formats supported in the toolkit, and the `BMPFile` parser exposes all four logical regions of a BMP file — the Bitmap File Header, the DIB Header, the optional Color Table, and the Pixel Array — as annotated tree nodes with byte offsets and field descriptions.

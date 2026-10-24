@@ -116,9 +116,20 @@ The `icon` and `description` fields are omitted when absent; `children` is omitt
 ```java
 // The base class every format parser extends
 public abstract class FileFormat {
-    public final byte[] fileByteArray;
+    public final String fileName;       // the file's name (no path)
+    public final String filePath;       // the absolute path of the file
+    public final byte[] fileByteArray;  // raw bytes of the entire file
+
+    // Abstract — every format parser must implement these two:
     public abstract String getContentTabName();
     public abstract void generateTreeNode(DefaultMutableTreeNode parentNode);
+
+    // Concrete helpers available to all parsers:
+    public byte[] getFileByteArray(int startIndex, int length) { ... }
+    public Collection<FileComponent> getFileComponents() { ... }
+    public Optional<Icons> getIcon() { ... }
+    public void treeSelectionChanged(JTreeNodeFileComponent userObj, JTabbedPane tabs) { ... }
+    protected void addFileComponent(FileComponent comp) { ... }
 }
 
 // The service provider interface every format plugin implements

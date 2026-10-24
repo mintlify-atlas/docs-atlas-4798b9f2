@@ -1,7 +1,7 @@
 ---
 title: "ZIP Archive Format — Binary Internals Parser"
 sidebarTitle: "ZIP"
-description: "How Binary Internals parses ZIP archives: Local File Headers, Central Directory Structures, End of Central Directory Record, and all per-entry metadata fields."
+description: "How Binary Internals parses ZIP archives: Local File Headers, Central Directory Structure, End of Central Directory Record, and ZIP signatures."
 ---
 
 ZIP is one of the most widely used archive formats in the world. Beyond `.zip` files themselves, many common formats are ZIP archives in disguise: Java `.jar` files, Android `.apk` packages, Microsoft Office `.docx` and `.xlsx` documents, and OpenDocument `.odt` files are all valid ZIP archives that Binary Internals can open and parse. The `ZIPFile` parser locates the End of Central Directory Record at the end of the file, uses it to find the Central Directory, and then maps each Central Directory entry back to its Local File Header at the front of the file. All three structures are exposed as annotated, interactive tree nodes.

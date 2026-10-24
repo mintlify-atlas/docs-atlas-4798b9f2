@@ -12,11 +12,15 @@ Before you build, make sure the following are available on your machine:
 
 | Requirement | Version | Notes |
 |---|---|---|
-| OpenJDK | 11 or higher (tested up to 25) | Set `JAVA_HOME` to the JDK root |
-| Apache Maven | 3.9 or higher | Required for the `${revision}` CI Friendly Versions feature |
+| OpenJDK | 25 or higher (to compile) | Set `JAVA_HOME` to the JDK root; JDK 11+ is sufficient to *run* the produced JARs |
+| Apache Maven | 3.9 or higher | Required by both the enforcer plugin and the `${revision}` CI Friendly Versions feature |
 
 <Warning>
-  Maven **3.9 or higher** is required. Older versions do not support the [Maven CI Friendly Versions](https://maven.apache.org/maven-ci-friendly.html) `${revision}` property used in the root `pom.xml`, and the build will fail with an unresolved variable error.
+  **JDK 25 or higher is required to build from source.** The root `pom.xml` sets `maven.compiler.release=25` and the Maven Enforcer plugin enforces `requireJavaVersion >= 25`, so older JDKs will fail at the `validate` phase. A JDK 11 runtime is sufficient to *run* the pre-built viewer or web server JARs, but not to compile them.
+</Warning>
+
+<Warning>
+  Maven **3.9 or higher** is required. The Maven Enforcer plugin in the root `pom.xml` declares `[3.9.0,)` as the required version range, so older versions will fail at the `validate` phase.
 </Warning>
 
 Verify both tools are on your `PATH`:
@@ -127,12 +131,13 @@ If you prefer to invoke Maven without the build script (for example, to skip the
 mvn clean install
 ```
 
-To skip the static analysis checks during a quick iteration:
+To skip tests and downgrade static-analysis failures to warnings during a quick iteration:
 
 ```bash
 mvn clean install \
   -DskipTests \
-  -Dcheckstyle.skip=true \
-  -Dspotbugs.skip=true \
-  -Dpmd.skip=true
+  -Dcheckstyle.failOnViolation=false \
+  -Dspotbugs.failOnError=false
 ```
+
+These are the override properties configured in the root `pom.xml`. `-DskipTests` is the standard Maven Surefire flag; `-Dcheckstyle.failOnViolation=false` and `-Dspotbugs.failOnError=false` downgrade those checks from build-breaking errors to warnings rather than skipping them entirely.

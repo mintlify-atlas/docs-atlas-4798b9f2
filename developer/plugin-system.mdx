@@ -148,6 +148,7 @@ public class FOOFile extends FileFormat {
 | `getPos()` | Returns the current absolute byte offset in the stream |
 | `getOffset()` | Returns the base offset for partial / sub-streams |
 | `readShortInLittleEndian()` | Reads a `short` in little-endian order |
+| `readUnsignedShortInLittleEndian()` | Reads an unsigned `short` in little-endian order as `int` |
 | `readIntInLittleEndian()` | Reads an `int` in little-endian order |
 | `readUnsignedInt()` | Reads a 4-byte value as an unsigned `long` |
 | `readUnsignedIntInLittleEndian()` | Unsigned little-endian `int` as `long` |
@@ -165,7 +166,7 @@ public class FOOFile extends FileFormat {
 | `startPos` | Constructor arg 1 | Byte offset where this component starts |
 | `length` | Constructor arg 2 | Number of bytes this component covers |
 | `text` | Constructor arg 3 | Label shown in the tree (must not be null or empty) |
-| `icon` | `setIcon(Icon)` or overloaded constructor | Tree node icon from the `Icons` enum |
+| `icon` | `setIcon(Icon icon)` (post-construction) or overloaded constructor `(int, int, String, Icons)` / `(int, int, String, Icons, String)` | Tree node icon; constructors accept an `Icons` enum value, the setter accepts a raw `javax.swing.Icon` |
 | `description` | `setDescription(String)` or overloaded constructor | HTML string shown in the description panel |
 
 A complete `generateTreeNode` body follows the pattern from the BMP `BitmapFileHeader`:

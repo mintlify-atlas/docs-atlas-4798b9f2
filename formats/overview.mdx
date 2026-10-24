@@ -1,7 +1,7 @@
 ---
 title: "Binary File Formats Supported by Binary Internals"
 sidebarTitle: "Overview"
-description: "Explore which file formats Binary Internals can parse, their stability status, and how the file-extension plugin dispatch model routes files to the right parser."
+description: "Binary Internals format support overview: stable parsers for BMP, CLASS, JPEG, PNG, and ZIP; in-development DEX and ELF parsers; experimental PDF parser."
 ---
 
 Binary Internals is a Java toolkit that visualizes the internal byte-level structure of binary files. Each supported format is implemented as a self-contained plugin that receives the raw byte array and produces a navigable tree of named, annotated fields. When you open a file — either in the desktop viewer or via the HTTP API — the framework reads the file extension, looks up the matching `PluginDescriptor`, instantiates the corresponding parser class, and passes the file bytes to it. The result is a rich tree you can explore field by field, with hex offsets, lengths, and descriptions drawn directly from the format specification.
@@ -31,7 +31,7 @@ Binary Internals is a Java toolkit that visualizes the internal byte-level struc
     Parses the 16-byte ELF identification block and the 64-bit ELF header (`Elf64_Ehdr`). Only ELF64 is currently implemented. **Status: In Development.**
   </Card>
   <Card title="PDF Document" icon="file-pdf" href="#">
-    PDF format support is planned but currently on hold. No parser is available yet.
+    Parses the PDF file header, comments, indirect objects, cross-reference tables, and end-of-file markers. The module exists but is not listed in the README's stable format set; treat it as experimental.
   </Card>
 </CardGroup>
 
@@ -46,7 +46,7 @@ Binary Internals is a Java toolkit that visualizes the internal byte-level struc
 | PNG Image | `.png` | `PNGFile` | ✅ Stable |
 | Android DEX | `.dex` | `DexFile` | 🚧 In Development |
 | ELF Binary | `.axf`, `.bin`, `.elf`, `.o`, `.prx`, `.puff`, `.so` | `ElfFile` | 🚧 In Development |
-| PDF Document | `.pdf` | — | ⏸ On Hold |
+| PDF Document | `.pdf` | `PDFFile` | 🧪 Experimental |
 
 ## How Format Dispatch Works
 

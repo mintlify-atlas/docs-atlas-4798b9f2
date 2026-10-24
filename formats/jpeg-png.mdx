@@ -1,7 +1,7 @@
 ---
 title: "JPEG and PNG Image Formats — Binary Internals Parser"
 sidebarTitle: "JPEG & PNG"
-description: "How Binary Internals parses JPEG and PNG image files, exposing JPEG marker segments (SOI, APP0–APP15, DHT, DQT, SOF, SOS, EOI) and PNG chunks (IHDR, IDAT, IEND, PLTE, and all ancillary chunks)."
+description: "How Binary Internals parses JPEG marker segments (SOI, APPnn, DHT, DQT, SOFnn, SOS, EOI) and PNG chunks (IHDR, IDAT, IEND, PLTE, and all ancillary types)."
 ---
 
 JPEG and PNG are the two most common raster image formats on the web and in software development. While they share nothing structurally, both use a sequenced, tagged approach to organizing image data — JPEG uses markers and PNG uses chunks — making them well-suited to Binary Internals' tree-based visualization. Binary Internals ships a parser for each format, and both are invoked automatically by file extension. The JPEG parser identifies and annotates every 2-byte marker in the file, and the PNG parser walks every 4-part chunk from the file signature through the mandatory `IEND` terminator.

@@ -1,7 +1,7 @@
 ---
 title: "ELF Binary Format — Binary Internals Parser"
 sidebarTitle: "ELF"
-description: "How Binary Internals parses ELF binaries: the 16-byte identification block, ELF64 header fields, file types, machine architectures, and current development status."
+description: "Binary Internals ELF parser: the e_ident block, ELF64 header fields, ELF_FileType values, and ELF_Machine architectures. In active development, ELF64 only."
 ---
 
 ELF (Executable and Linkable Format) is the standard binary format for executables, shared libraries, object files, and core dumps on Linux and other Unix-like operating systems. It is used across a wide range of CPU architectures including x86, x86-64, ARM, AArch64, RISC-V, MIPS, PowerPC, and SPARC. Binary Internals includes an `ElfFile` parser that reads the 16-byte identification block and the 64-bit ELF header, exposing each field in an annotated, interactive tree. The parser currently assumes a 64-bit x86-based architecture (`Elf64_Ehdr`), which is the most common case for modern Linux systems.
@@ -26,10 +26,15 @@ ELF is defined by the [System V ABI](https://en.wikipedia.org/wiki/Executable_an
 
 | Type | Constant | Description |
 |------|----------|-------------|
+| None | `ET_NONE` (0x00) | Unknown or unspecified type |
 | Relocatable | `ET_REL` (0x01) | Object file produced by the compiler, not yet linked |
 | Executable | `ET_EXEC` (0x02) | Standalone executable with fixed virtual addresses |
 | Shared object | `ET_DYN` (0x03) | Shared library or position-independent executable |
 | Core file | `ET_CORE` (0x04) | Process memory dump |
+| OS-specific low | `ET_LOOS` (0xFE00) | OS-specific range lower bound |
+| OS-specific high | `ET_HIOS` (0xFEFF) | OS-specific range upper bound |
+| Processor-specific low | `ET_LOPROC` (0xFF00) | Processor-specific range lower bound |
+| Processor-specific high | `ET_HIPROC` (0xFFFF) | Processor-specific range upper bound |
 
 ## ELF Identification Block (`e_ident`, 16 bytes)
 
@@ -62,14 +67,28 @@ Offset  Size  Field           Description
 | 1 | `ELFDATA2LSB` | Little-endian |
 | 2 | `ELFDATA2MSB` | Big-endian |
 
-### EI_OSABI values (selected)
+### EI_OSABI values
 
 | Value | Constant | Target OS/ABI |
 |-------|----------|---------------|
 | 0x00 | `ELFOSABI_NONE` | System V / unspecified |
+| 0x01 | `HP_UNIX` | HP-UX |
+| 0x02 | `NetBSD` | NetBSD |
 | 0x03 | `ELFOSABI_LINUX` | Linux |
+| 0x04 | `GNU_Hurd` | GNU Hurd |
+| 0x06 | `Solaris` | Solaris |
+| 0x07 | `AIX` | AIX |
+| 0x08 | `IRIX` | IRIX |
 | 0x09 | `FreeBSD` | FreeBSD |
+| 0x0A | `Tru64` | Tru64 UNIX |
+| 0x0B | `Novell_Modesto` | Novell Modesto |
 | 0x0C | `OpenBSD` | OpenBSD |
+| 0x0D | `OpenVMS` | OpenVMS |
+| 0x0E | `NonStop_Kernel` | HP Non-Stop Kernel |
+| 0x0F | `AROS` | AROS |
+| 0x10 | `Fenix_OS` | Fenix OS |
+| 0x11 | `CloudABI` | CloudABI |
+| 0x12 | `Stratus_Technologies_OpenVOS` | Stratus Technologies OpenVOS |
 | 0x41 | `ELFOSABI_ARM_FDPIC` | ARM FDPIC platform |
 
 ## ELF64 Header (`Elf64_Ehdr`)
@@ -101,6 +120,7 @@ The `e_machine` field identifies the target CPU. Binary Internals recognizes the
 
 | Value | Constant | Architecture |
 |-------|----------|-------------|
+| 0x00 | `NotSet` | No specific instruction set |
 | 0x02 | `SPARC` | SPARC |
 | 0x03 | `x86` | x86 (IA-32) |
 | 0x08 | `MIPS` | MIPS |
@@ -108,7 +128,10 @@ The `e_machine` field identifies the target CPU. Binary Internals recognizes the
 | 0x15 | `PowerPC64` | PowerPC (64-bit) |
 | 0x16 | `S390` | IBM S390 / z/Architecture |
 | 0x28 | `ARM` | ARM (32-bit) |
+| 0x2A | `SuperH` | SuperH |
+| 0x32 | `IA64` | Intel IA-64 |
 | 0x3E | `amd64` | x86-64 / AMD64 |
+| 0x8C | `TMS320C6000` | Texas Instruments TMS320C6000 |
 | 0xB7 | `AArch64` | ARM 64-bit (AArch64) |
 | 0xF3 | `RISC_V` | RISC-V |
 
